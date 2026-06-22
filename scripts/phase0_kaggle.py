@@ -5,15 +5,26 @@ a baseline->fine-tuned NDCG@10 delta, for the mentor gate. Prove the pipeline, n
 
 This file has NO dependency on the (private) lexfr_embed package — it inlines the
 confirmed LegalKit/BSARD field mappings so you can paste it into a Kaggle notebook cell
-and run. Cost: $0. GPU: Kaggle T4 (x1 is enough). To run on Kaggle:
+and run. Cost: $0.
 
-    !pip install -U -q sentence-transformers datasets
-    # then paste this file's body (or %run it) and call main()
+PROVEN Kaggle setup (verified 2026-06-22 — MiniLM, 1 epoch, 9.8k LegalKit pairs:
+BSARD NDCG@10 0.055 -> 0.148, recall@100 0.16 -> 0.42):
+- **Accelerator: GPU T4, NOT P100.** Kaggle's torch 2.10/cu128 dropped Pascal/sm_60, so a
+  P100 fails with "CUDA error: no kernel image". Via the API:  kaggle kernels push --accelerator NvidiaTeslaT4
+- **First notebook cell (BEFORE importing torch):** pin Kaggle's GPU-matched torch so pip
+  can't replace it, use a single T4 (avoids DataParallel OOM), and reduce fragmentation:
+      import os
+      os.environ['PYTORCH_CUDA_ALLOC_CONF']='expandable_segments:True'
+      os.environ['CUDA_VISIBLE_DEVICES']='0'
+      import torch; open('/tmp/c.txt','w').write(f'torch=={torch.__version__}\\n')
+      !pip install -U -q sentence-transformers datasets -c /tmp/c.txt
+  then run this file (its __main__ guard calls main()).
 
 Notes:
-- T4 is Turing -> use **fp16** (bf16 needs Ampere+). Set on TrainingArguments below.
-- Default base model is a small, robust, no-prefix multilingual encoder for a fast,
-  paste-and-run smoke. Swap BASE_MODEL to "BAAI/bge-m3" or "Qwen/Qwen3-Embedding-0.6B"
+- T4 is Turing -> **fp16** (bf16 needs Ampere+). Training frees memory before the final
+  eval encode (del trainer + empty_cache) to avoid a 16 GB OOM.
+- Default base is a small, robust, no-prefix multilingual encoder for a fast smoke. Swap
+  BASE_MODEL to "BAAI/bge-m3" (mind its larger eval-encode memory) or "Qwen/Qwen3-Embedding-0.6B"
   for a representative number once the pipeline is proven (mind their prompt/prefix quirks).
 """
 
@@ -110,6 +121,7 @@ def ir_eval(model, queries, corpus, relevant, name: str) -> dict:
         map_at_k=[100],
         name=name,
         show_progress_bar=True,
+        batch_size=32,
     )
     return evaluator(model)
 
@@ -157,7 +169,17 @@ def main() -> None:
         save_strategy="no",
         seed=SEED,
     )
-    SentenceTransformerTrainer(model=model, args=args, train_dataset=train_ds, loss=loss).train()
+    trainer = SentenceTransformerTrainer(model=model, args=args, train_dataset=train_ds, loss=loss)
+    trainer.train()
+
+    # free training memory (optimizer/grads) before the final eval encode — avoids T4 OOM
+    import gc
+
+    import torch
+
+    del trainer, loss
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # 4) EVAL AFTER + the delta to show the mentor
     after = ir_eval(model, queries, corpus, relevant, "finetuned")
