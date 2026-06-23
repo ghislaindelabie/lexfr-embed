@@ -7,8 +7,12 @@ This file has NO dependency on the (private) lexfr_embed package — it inlines 
 confirmed LegalKit/BSARD field mappings so you can paste it into a Kaggle notebook cell
 and run. Cost: $0.
 
-PROVEN Kaggle setup (verified 2026-06-22 — MiniLM, 1 epoch, 9.8k LegalKit pairs:
-BSARD NDCG@10 0.055 -> 0.148, recall@100 0.16 -> 0.42):
+PROVEN Kaggle results (1 epoch, 9.8k LegalKit pairs, BSARD test, max_seq 512):
+  MiniLM (full-FT):  NDCG@10 0.055 -> 0.148  (recall@100 0.16 -> 0.42)
+  BGE-M3 (LoRA):     NDCG@10 0.240 -> 0.292  (recall@100 0.59 -> 0.64)   <- representative
+The strong base (BGE-M3) starts far higher and gains less in relative terms — expected.
+
+Setup that makes it run on Kaggle:
 - **Accelerator: GPU T4, NOT P100.** Kaggle's torch 2.10/cu128 dropped Pascal/sm_60, so a
   P100 fails with "CUDA error: no kernel image". Via the API:  kaggle kernels push --accelerator NvidiaTeslaT4
 - **First notebook cell (BEFORE importing torch):** pin Kaggle's GPU-matched torch so pip
@@ -17,15 +21,16 @@ BSARD NDCG@10 0.055 -> 0.148, recall@100 0.16 -> 0.42):
       os.environ['PYTORCH_CUDA_ALLOC_CONF']='expandable_segments:True'
       os.environ['CUDA_VISIBLE_DEVICES']='0'
       import torch; open('/tmp/c.txt','w').write(f'torch=={torch.__version__}\\n')
-      !pip install -U -q sentence-transformers datasets -c /tmp/c.txt
+      !pip install -U -q sentence-transformers datasets peft -c /tmp/c.txt
+      !pip uninstall -y -q torchao   # peft 0.19 raises on Kaggle's torchao 0.10<0.16 (unused for LoRA)
   then run this file (its __main__ guard calls main()).
 
 Notes:
 - T4 is Turing -> **fp16** (bf16 needs Ampere+). Training frees memory before the final
   eval encode (del trainer + empty_cache) to avoid a 16 GB OOM.
-- Default base is a small, robust, no-prefix multilingual encoder for a fast smoke. Swap
-  BASE_MODEL to "BAAI/bge-m3" (mind its larger eval-encode memory) or "Qwen/Qwen3-Embedding-0.6B"
-  for a representative number once the pipeline is proven (mind their prompt/prefix quirks).
+- Default base is now **BAAI/bge-m3** (568M) with **LoRA** (USE_LORA=True) so it fits a 16GB
+  T4 — full fine-tune of 568M would OOM. For a fast pipeline smoke, set BASE_MODEL to the
+  MiniLM fallback + USE_LORA=False (118M, full-FT, no prefix quirks).
 """
 
 from __future__ import annotations
@@ -35,14 +40,18 @@ import re
 import unicodedata
 
 # ----------------------------- CONFIG (tweak here) ----------------------------- #
-BASE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fast, FR-capable, no prefix
+BASE_MODEL = "BAAI/bge-m3"  # 568M, MIT, 1024-dim, 8192 ctx (MiniLM smoke fallback noted in docstring)
 LEGALKIT_SUBSET = 12_000  # small Phase-0 subset (stratified by code)
-MATRYOSHKA_DIMS = [384, 256, 128, 64]  # filtered to <= model dim at runtime
+MATRYOSHKA_DIMS = [1024, 512, 256, 128, 64]  # filtered to <= model dim at runtime
 BSARD_SPLIT = "test"  # 222 held-out questions
 MAX_SEQ_LEN = 512  # cap (BSARD articles can be huge) -> bounds eval time
-BATCH_SIZE = 64
+USE_LORA = True  # LoRA for >=568M bases — fits a 16GB T4 (full-FT would OOM)
+LORA_R = 16
+LORA_ALPHA = 32
+BATCH_SIZE = 16  # train batch (LoRA BGE-M3 on a 16GB T4)
+EVAL_BATCH = 16  # eval-encode batch (BGE-M3 568M @ 1024-dim)
 EPOCHS = 1
-LR = 2e-5
+LR = 1e-4  # LoRA LR (higher than full-FT's 2e-5)
 SEED = 42
 PUSH_TO = None  # e.g. "ghislaindelabie/lexfr-embed-phase0" (needs HF_TOKEN)
 # ------------------------------------------------------------------------------- #
@@ -121,7 +130,7 @@ def ir_eval(model, queries, corpus, relevant, name: str) -> dict:
         map_at_k=[100],
         name=name,
         show_progress_bar=True,
-        batch_size=32,
+        batch_size=EVAL_BATCH,
     )
     return evaluator(model)
 
@@ -151,6 +160,19 @@ def main() -> None:
     print(f"BSARD: {len(queries)} queries over {len(corpus)} articles")
     model = SentenceTransformer(BASE_MODEL)
     model.max_seq_length = MAX_SEQ_LEN
+    if USE_LORA:
+        from peft import LoraConfig, TaskType
+
+        # LoRA inits with B=0 → adds nothing at init, so zero-shot below == the base model.
+        model.add_adapter(
+            LoraConfig(
+                task_type=TaskType.FEATURE_EXTRACTION,
+                inference_mode=False,
+                r=LORA_R,
+                lora_alpha=LORA_ALPHA,
+                lora_dropout=0.1,
+            )
+        )
     before = ir_eval(model, queries, corpus, relevant, "zeroshot")
     print("ZERO-SHOT:", before)
 
