@@ -2,7 +2,7 @@
 
 *A detailed trace of decisions, implementation steps, and intermediary results. Combines the working discussions, the validated results, and what is recorded in git. Chronological with consolidated tables at the end.*
 
-**Last updated:** 2026-06-23 · **Status:** Phase 0 complete (pipeline validated on free Kaggle GPUs); Phase 1 about to start.
+**Last updated:** 2026-06-24 · **Status:** Phase 0 complete (pipeline validated on free Kaggle GPUs); PRs #1–#3 merged; repo **public** (JOSS clock started, eligible ~2026-12-23); Phase 1 about to start.
 
 ---
 
@@ -26,7 +26,7 @@ It serves **two purposes at once**:
 | Phase | Window | Goal | Compute |
 |---|---|---|---|
 | **Research & planning** | 2026-06-14 → 06-20 | Justify the build; recipe; budget; hardware; scaffold | — |
-| **Phase 0 — walking skeleton** | → **mentor gate Thu 2026-06-25** | Prove the full pipeline; baseline→fine-tuned BSARD delta | **Free (Kaggle T4)** |
+| **Phase 0 — walking skeleton** | → **mentor gate Fri 2026-06-26** | Prove the full pipeline; baseline→fine-tuned BSARD delta | **Free (Kaggle T4)** |
 | **Phase 1 — full recipe** | card arrives ≈ Sat 06-27 → **submit Tue 2026-07-07** | Hard negatives + synthetic queries + multi-model compare + French eval set | Local RTX 5060 Ti + RunPod burst |
 | **Phase 2 — publication** | post-07-07, no deadline | arXiv preprint + HF model/dataset release; workshop paper | Local + RunPod |
 
@@ -161,7 +161,8 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
 - **Hard-negative mining and synthetic-query generation are stubs** — the two biggest Phase-1 levers, not yet implemented.
 - **BSARD is Belgian** — current numbers are cross-jurisdiction transfer; a French-national eval is needed for a defensible headline.
 - **BGE-M3 long-context edge under-tested** — max_seq capped at 512 on the T4 (1024 tried, minor gain); revisit on the local card.
-- **PR #1 not merged** — Phase-0 runner lives only on the feature branch.
+- **Phase-1 entrypoint not runnable yet** — `train.py` is a skeleton (raises `NotImplementedError`); `hard_negatives.mine()` and `synthetic_queries.{generate_queries,consistency_filter}` are stubs. The validated end-to-end path is `scripts/phase0_kaggle.py`.
+- **GPU bring-up undocumented** — the MSI 5060 Ti is Blackwell (sm_120) → needs a CUDA 12.8 / recent torch build (same class of issue as the Kaggle Pascal failure). No local bring-up checklist yet.
 
 ---
 
@@ -178,6 +179,6 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
 - **Research reports:** `~/code/law-embedder/docs/research/` (10 reports) + vault HTML `/doc/law-embedder-report`.
 - **Proposal:** `~/code/law-embedder/docs/proposal/` + vault HTML `/doc/law-embedder-proposition`.
 - **Hardware:** `~/vault/work/projects/legal-finetune/p710-hardware-feasibility.md`; `server-p710` skill reference.
-- **Specs in-repo:** `docs/eval-set-spec.md` (incl. general-capability retention), `docs/publication-venues.md`.
+- **Specs in-repo:** `docs/data-and-evaluation.md` (train-vs-eval map — read first), `docs/eval-set-spec.md` (French eval-set build + retention), `docs/publication-venues.md`.
 - **Code (Phase-1 eval):** `src/lexfr_embed/general_eval.py` + `scripts/eval_general.py` (retention check) + `tests/test_general_eval.py`.
 - **Publication strategy:** `~/vault/personal/projects/research-career/lexfr-embed-publication-strategy.md` (HTML `/doc/lexfr-embed-publication-strategy`).

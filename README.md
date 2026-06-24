@@ -9,6 +9,7 @@ No open embedder exists for **French national law** (the Maastricht models cover
 - 📖 Research report (mobile): https://p710.tail3089b5.ts.net:8445/doc/law-embedder-report
 - 📄 Mentor proposal (FR): https://p710.tail3089b5.ts.net:8445/doc/law-embedder-proposition
 - Markdown sources: `../law-embedder/docs/` *(planning docs; to be consolidated into `docs/` here)*
+- **In-repo specs:** `docs/data-and-evaluation.md` (what we train vs eval on — start here), `docs/eval-set-spec.md` (French eval set), `docs/publication-venues.md`
 
 ## Approach (one screen)
 
@@ -49,7 +50,7 @@ make smoke                     # end-to-end walking skeleton on a tiny model (ne
 
 ## Plan (real calendar)
 
-- **Phase 0 (→ Thu 25 Jun):** free Kaggle walking skeleton → mentor gate. **$0.**
+- **Phase 0 (→ Fri 26 Jun):** free Kaggle walking skeleton → mentor gate. **$0.** ✅ done.
 - **Phase 1 (card ≈ 27 Jun → submit 7 Jul):** full-steam local serial + RunPod burst.
 - **Phase 2 (post-7 Jul):** extended runs → arXiv preprint + HF model/dataset release.
 
