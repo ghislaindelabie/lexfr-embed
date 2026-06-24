@@ -39,6 +39,23 @@ Civil · Travail · Pénal · Commerce · Consommation · Fiscal/monétaire (+ h
 
 **NDCG@10 + Recall@100** primary (MTEB/MLEB convention); also MRR, R@10. **Bootstrap confidence intervals** (sizes are above the IR floor but below the high-power regime). Report Track A and B side by side.
 
+## General-capability retention (catastrophic-forgetting guard)
+
+Contrastive fine-tuning (MNRL) on a narrow *legal* distribution can degrade the model's **general** French/English behaviour — catastrophic forgetting / representation collapse toward legalese. The legal eval above will **not** catch this (it is legal-only). So every Phase-1 run also reports a **before-vs-after retention regression** on a small, fixed, strictly **non-legal** benchmark subset (MTEB(fr) + BEIR).
+
+| Family | Tasks (MTEB) | Why |
+|---|---|---|
+| **FR retrieval** | AlloprofRetrieval, SyntecRetrieval, MintakaRetrieval | the deployed capability (general, non-legal) |
+| **EN retrieval** | SciFact, FiQA2018 (BEIR) | multilingual base → confirm EN didn't collapse |
+| **FR STS** | STSBenchmarkMultilingualSTS, SICKFr | semantic-geometry sanity check |
+| **FR clustering** | AlloProfClusteringS2S | optional extra signal |
+
+**Protocol:** score the base model, then the fine-tuned model, on the identical suite; report per-task Δ. **Acceptance:** the legal metric rises meaningfully **while** each general task drops by **no more than ±0.02** (absolute NDCG@10 / Spearman / V-measure ≈ within noise). A larger drop ⇒ over-specialised. Verify at the **deployed Matryoshka dim** (e.g. 256/512), not just full 1024.
+
+**If it regresses:** lower LR / fewer epochs · keep LoRA and report adapter-on vs adapter-off (toggling the adapter off recovers the base) · *rehearsal*: mix ~5–15 % general pairs (MS-MARCO / MIRACL slice) into training · or accept it *iff* the product only ever serves legal queries (state the scope explicitly).
+
+**Implementation:** `scripts/eval_general.py` (before/after deltas + PASS/FAIL, exit-code-gated) over `src/lexfr_embed/general_eval.py` (the suite + pure verdict logic, unit-tested in `tests/test_general_eval.py`); needs the `mteb` `eval` extra. The retention suite is deliberately **legal-free** (BSARD / Track A/B handled above). Bonus: an explicit forgetting check strengthens the OC evaluation blocks (BC03/BC05).
+
 ## The "LLM-eval just rewards the generator's style" risk
 
 Real for us — training (LegalKit) and a tempting eval source share the LLM-query paradigm. STARD shows lay queries crater retrieval (R@100 ≈ 0.91) vs near-saturation on synthetic. Mitigations (all in the recipe): headline is non-synthetic (Track A); report both distributions; Léo spot-check; any synthetic augmentation uses a **different generator/prompt than LegalKit** + human verification; ID-level leakage filter.

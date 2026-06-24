@@ -21,7 +21,7 @@ dependencies = [
 gpu = ["bitsandbytes>=0.43"]            # QLoRA on GPU environments only
 track = ["wandb>=0.18"]                  # experiment tracking (report_to="wandb")
 serve = ["fastapi>=0.115", "uvicorn>=0.30"]
-eval = ["ir-measures>=0.3"]              # optional richer IR metrics; ST evaluator covers the core
+eval = ["ir-measures>=0.3", "mteb>=1.12"]  # richer IR metrics + general-retention suite (scripts/eval_general.py)
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [build-system]
