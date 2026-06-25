@@ -3,6 +3,17 @@
 Noumon's lesson: for <~10k pairs, **1 filtered hard negative per query** is the sweet
 spot; mining many raw negatives *regresses* results. Use a margin filter to avoid
 false negatives.
+
+Phase-2 enhancement (optional — documented for later use): the `relative_margin` filter
+is cheap but imperfect. French legal queries are frequently **multi-label**, so a mined
+"negative" can actually be a real (unlabelled) relevant article — a *false negative* that
+teaches the model the wrong boundary if used. Before trusting mined negatives at scale,
+add a second confirmation pass: score each (query, candidate) with a **cross-encoder
+reranker** (e.g. a multilingual/legal cross-encoder) or an **LLM judge**, and DROP any
+candidate it rates relevant above a threshold; keep only the confirmed-irrelevant ones.
+Gate/sample it (cost), use a model from a different family than the embedder, and log how
+many candidates it rejects (a high reject rate flags a noisy mining step). See
+docs/training-data-strategy.md R4.
 """
 
 from __future__ import annotations
