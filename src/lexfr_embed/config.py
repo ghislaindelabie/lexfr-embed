@@ -45,13 +45,16 @@ class Settings(BaseSettings):
     results_dir: Path = REPO_ROOT / "results"
 
     # --- model choice ---
-    base_model_key: str = "qwen3-0.6b"  # Phase 0: set to "smoke"
+    base_model_key: str = "bge-m3"  # Phase-1 MVP base (fits 16GB full-FT/LoRA); "smoke"=MiniLM for the CPU wiring test
     matryoshka_dims: list[int] = [1024, 512, 256, 128, 64]
 
     # --- training hyperparameters (research §03 starting points) ---
     epochs_stage1: int = 2
     epochs_stage2: int = 1
-    batch_size: int = 64  # CachedMNRL decouples effective batch from VRAM
+    batch_size: int = 128  # effective batch (CachedMNRL decouples it from VRAM)
+    mini_batch_size: int = 16  # CachedMNRL per-step micro-batch — bounds VRAM
+    max_seq_len: int = 512  # training/eval sequence cap (Phase-0 tested 512 vs 1024; 512 is faster, 1024 a minor lever)
+    rehearsal_frac: float = 0.07  # general FR/EN pairs mixed in from run 1 (anti-forgetting floor)
     lr_full_ft: float = 2e-5
     lr_lora: float = 1e-4
     lora_r: int = 16
