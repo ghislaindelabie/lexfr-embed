@@ -6,10 +6,21 @@ MDE note (a delta below its MDE is flagged 'within noise', never claimed as impr
 
 from __future__ import annotations
 
-from math import sqrt
+from collections.abc import Iterable
+from math import log2, sqrt
 from statistics import NormalDist
 
 import numpy as np
+
+
+def ndcg_at_k(ranked_ids: list, gold_ids: Iterable, k: int = 10) -> float:
+    """Pure NDCG@k for one query: a ranked id list + the set of relevant ids. Multi-label aware."""
+    gold = set(gold_ids)
+    if not gold:
+        return 0.0
+    dcg = sum(1.0 / log2(i + 2) for i, cid in enumerate(ranked_ids[:k]) if cid in gold)
+    idcg = sum(1.0 / log2(i + 2) for i in range(min(len(gold), k)))
+    return dcg / idcg if idcg > 0 else 0.0
 
 
 def bootstrap_ci(scores, n_boot: int = 1000, seed: int = 42, alpha: float = 0.05) -> tuple[float, float]:

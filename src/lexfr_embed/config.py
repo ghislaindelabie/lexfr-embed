@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     lora_alpha: int = 32
     use_lora_above_params: float = 1e9  # LoRA for bases > ~1B params
     hard_neg_relative_margin: float = 0.05
+    use_cached_mnrl: bool = False  # Stage-1: plain MNRL default; CachedMNRL opt-in (gated on the CPU smoke)
     seed: int = 42
 
     # --- dataset sizing (research §03/§04) ---
@@ -73,8 +74,18 @@ class Settings(BaseSettings):
 
     @property
     def report_to(self) -> str:
-        """Graceful: W&B if a key is set, else off (mirrors the OC14 pattern)."""
-        return "wandb" if self.wandb_api_key else "none"
+        """Graceful: W&B only if a key is set AND wandb is importable (else off).
+
+        Checking importability (not just the key) keeps CPU/smoke runs working without the
+        `track` extra; the real run does `uv sync --extra track` to enable logging.
+        """
+        if not self.wandb_api_key:
+            return "none"
+        try:
+            import wandb  # noqa: F401
+        except ImportError:
+            return "none"
+        return "wandb"
 
 
 settings = Settings()

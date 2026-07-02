@@ -19,19 +19,39 @@ docs/training-data-strategy.md R4.
 from __future__ import annotations
 
 
-def mine(train_pairs, model, *, num_negatives: int = 1, relative_margin: float = 0.05):
-    """Wrap sentence-transformers' mine_hard_negatives with our defaults.
+def pairs_to_anchor_positive_dict(train_pairs: list[dict]) -> dict:
+    """Pure: [{anchor, positive, code?}, ...] -> {"anchor": [...], "positive": [...]}.
 
-    TODO(Phase 1): convert train_pairs -> a Dataset(anchor, positive), then:
-
-        from sentence_transformers.util import mine_hard_negatives
-        mined = mine_hard_negatives(
-            dataset, model,
-            num_negatives=num_negatives,        # 1 (research §03)
-            relative_margin=relative_margin,    # neg <= 95% as similar as positive
-            sampling_strategy="top",
-            use_faiss=True,
-        )
-        return mined  # (anchor, positive, negative) triplets
+    Drops everything but anchor/positive (MNRL wants only those two columns). Raises on an
+    empty list, or a pair missing 'anchor'/'positive'.
     """
-    raise NotImplementedError("Wrap sentence_transformers.util.mine_hard_negatives.")
+    if not train_pairs:
+        raise ValueError("no training pairs")
+    anchors, positives = [], []
+    for p in train_pairs:
+        if "anchor" not in p or "positive" not in p:
+            raise KeyError("each pair needs 'anchor' and 'positive'")
+        anchors.append(p["anchor"])
+        positives.append(p["positive"])
+    return {"anchor": anchors, "positive": positives}
+
+
+def mine(train_pairs, model, *, num_negatives: int = 1, relative_margin: float = 0.05):
+    """Mine `num_negatives` filtered hard negative(s) per query with `model` (the Stage-1 model).
+
+    Returns an (anchor, positive, negative) triplet Dataset. `relative_margin` drops candidates
+    too similar to the positive (likely false negatives — see the module note above).
+    """
+    from datasets import Dataset
+    from sentence_transformers.util import mine_hard_negatives
+
+    dataset = Dataset.from_dict(pairs_to_anchor_positive_dict(train_pairs))
+    return mine_hard_negatives(
+        dataset,
+        model,
+        num_negatives=num_negatives,
+        relative_margin=relative_margin,
+        sampling_strategy="top",
+        use_faiss=True,
+        output_format="triplet",
+    )

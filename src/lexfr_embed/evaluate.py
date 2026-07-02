@@ -55,5 +55,28 @@ def evaluate_model(model, queries, corpus, relevant) -> dict:
     return evaluator(model)
 
 
+def per_query_ndcg_at_k(model, queries: dict, corpus: dict, relevant: dict, k: int = 10, batch_size: int = 32):
+    """Per-query NDCG@k as a list (aligned to queries order) — feeds the paired bootstrap CI.
+
+    Integration layer (needs a model + torch); the NDCG math itself is the pure, tested
+    `metrics.ndcg_at_k`. Encodes normalised, ranks top-k by cosine via semantic_search.
+    """
+    from sentence_transformers import util
+
+    from lexfr_embed.metrics import ndcg_at_k
+
+    cids, qids = list(corpus), list(queries)
+    corpus_emb = model.encode(
+        [corpus[c] for c in cids], batch_size=batch_size, convert_to_tensor=True,
+        normalize_embeddings=True, show_progress_bar=True,
+    )
+    query_emb = model.encode(
+        [queries[q] for q in qids], batch_size=batch_size, convert_to_tensor=True,
+        normalize_embeddings=True, show_progress_bar=False,
+    )
+    hits = util.semantic_search(query_emb, corpus_emb, top_k=k)
+    return [ndcg_at_k([cids[h["corpus_id"]] for h in hits[i]], relevant.get(q, set()), k) for i, q in enumerate(qids)]
+
+
 if __name__ == "__main__":
     raise SystemExit("TODO: wire load_bsard() + a model path, then print the metrics table.")

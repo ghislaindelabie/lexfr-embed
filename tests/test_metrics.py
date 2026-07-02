@@ -3,7 +3,22 @@
 These back the Axis-1 bootstrap CI + the per-task MDE note in the scorecard.
 """
 
-from lexfr_embed.metrics import bootstrap_ci, min_detectable_effect, paired_delta_ci
+from lexfr_embed.metrics import bootstrap_ci, min_detectable_effect, ndcg_at_k, paired_delta_ci
+
+
+def test_ndcg_perfect_when_gold_at_rank1():
+    assert ndcg_at_k(["a", "b", "c"], {"a"}, k=10) == 1.0
+
+
+def test_ndcg_discounts_lower_ranks():
+    r2 = ndcg_at_k(["x", "a", "b"], {"a"}, k=10)  # gold at rank 2
+    assert 0.62 < r2 < 0.64  # 1/log2(3)
+
+
+def test_ndcg_zero_when_gold_absent_or_beyond_k():
+    assert ndcg_at_k(["x", "y", "z"], {"a"}, k=10) == 0.0
+    assert ndcg_at_k(["x", "a"], {"a"}, k=1) == 0.0  # gold at rank 2, k=1
+    assert ndcg_at_k(["a"], set(), k=10) == 0.0  # no gold
 
 
 def test_bootstrap_ci_zero_width_on_constant():
