@@ -13,6 +13,8 @@ export HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
 # fit BGE-M3 on a 24GB card: CachedMNRL chunks the batch (mini_batch 16); reduce encode fragmentation
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export LEXFR_EMBED_USE_CACHED_MNRL=true
+# RUN_RETENTION=1 -> also run the Axis-3 catastrophic-forgetting guard (installs mteb, drops --skip-retention)
+export RUN_RETENTION="${RUN_RETENTION:-0}"
 echo "[job] start $(date -u) | WANDB key present: ${WANDB_API_KEY:+yes} | RUNPOD_POD_ID=${RUNPOD_POD_ID:-?}"
 nvidia-smi -L || echo "[job] WARN no nvidia-smi"
 
@@ -60,9 +62,10 @@ print("[job] torch", torch.__version__, "cuda", torch.cuda.is_available(),
       torch.cuda.get_device_name(0) if torch.cuda.is_available() else "-")
 PY
 
-echo "[job] ===== installing training deps (no mteb — retention is a separate run) ====="
+MTEB_PKG=""; [ "$RUN_RETENTION" = "1" ] && MTEB_PKG="mteb"   # retention guard needs mteb; headline run skips it
+echo "[job] ===== installing training deps (retention=${RUN_RETENTION}) ====="
 pip install -q -U sentence-transformers "datasets>=3" peft accelerate faiss-cpu \
-    pydantic-settings rich -c /tmp/tc.txt 2>&1 | tail -3
+    pydantic-settings rich $MTEB_PKG -c /tmp/tc.txt 2>&1 | tail -3
 pip uninstall -y -q torchao 2>/dev/null || true
 
 echo "[job] ===== STAGE A: GPU smoke on a small task ====="
@@ -80,9 +83,15 @@ assert os.path.exists("/tmp/gpu_smoke/final")
 wandb.log({"gpu_smoke_passed": 1}); run.finish(); print("[job] GPU SMOKE PASSED")
 PY
 
-echo "[job] ===== STAGE B: graded run_phase1 --skip-retention (BGE-M3 two-stage + BSARD) ====="
-export WANDB_NAME="phase1-train"
-timeout 9000 python scripts/run_phase1.py --skip-retention || echo "[job] run_phase1 non-zero — see log/scorecard"
+if [ "$RUN_RETENTION" = "1" ]; then
+  echo "[job] ===== STAGE B: graded run_phase1 WITH retention (BGE-M3 two-stage + BSARD + MTEB guard) ====="
+  export WANDB_NAME="phase1-retention"
+  timeout 12000 python scripts/run_phase1.py || echo "[job] run_phase1 non-zero — see log/scorecard"
+else
+  echo "[job] ===== STAGE B: graded run_phase1 --skip-retention (BGE-M3 two-stage + BSARD) ====="
+  export WANDB_NAME="phase1-train"
+  timeout 9000 python scripts/run_phase1.py --skip-retention || echo "[job] run_phase1 non-zero — see log/scorecard"
+fi
 
 echo "[job] ===== ship results to W&B ====="
 python - <<'PY' || true

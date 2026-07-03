@@ -78,10 +78,16 @@ def main() -> None:
     # 6) Axis-3 RETENTION GUARD (general FR/EN, non-legal). base vs fine-tuned on the fixed suite.
     retention: list[dict] = []
     if not args.skip_retention:
+        import torch
+
         from lexfr_embed.general_eval import run_mteb, task_names
 
-        b = run_mteb(SentenceTransformer(settings.base_model_id), output_folder=str(results / "mteb/base"))
-        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"))
+        if torch.cuda.is_available():  # release training-pass fragmentation before big MTEB encodes
+            torch.cuda.empty_cache()
+        # batch 16 so BGE-M3 encoding FiQA2018's ~57k-doc corpus fits a 24 GB card
+        base_model = SentenceTransformer(settings.base_model_id)
+        b = run_mteb(base_model, output_folder=str(results / "mteb/base"), batch_size=16)
+        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"), batch_size=16)
         for t in task_names():
             if t in b and t in a:
                 # MTEB reports one aggregate score per task -> no per-query MDE; use the ±0.02 tolerance.
