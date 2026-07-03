@@ -57,9 +57,12 @@ def load_rehearsal_pairs(n: int, seed: int = 42) -> list[dict]:
 
     # (repo, config, split, query_col, positive_col) — small slices; ungated, PARQUET (no dataset
     # scripts, which HF datasets>=3 refuses to run). Verified loadable 2026-07-03.
+    # EN source is GooAQ (web-style Google QA), deliberately chosen over Wikipedia-factoid NQ to
+    # domain-match FiQA's web-retrieval register — the one task the open-domain floor didn't clear.
+    # NB: never BeIR/fiqa itself (that is the eval domain/corpus — would be training-on-eval).
     sources = [
         ("etalab-ia/piaf", None, "train", "question", "context"),  # FR QA over Wikipedia (general retrieval)
-        ("sentence-transformers/natural-questions", None, "train", "query", "answer"),  # EN general retrieval
+        ("sentence-transformers/gooaq", None, "train", "question", "answer"),  # EN web-style QA (matches FiQA register)
     ]
     per_source = max(1, n // len(sources))
     out: list[dict] = []
