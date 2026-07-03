@@ -186,6 +186,17 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
   - **Key insight:** open-domain EN rehearsal (Natural Questions = factoid Wikipedia) preserves the legal gain and lifts general tasks, but does **not** specifically protect FiQA's *financial* sub-domain — 7 % of open-domain pairs moved it only −0.002. Fully clearing it needs **domain-matched EN rehearsal** (MS-MARCO/web/financial) or a higher dose, *not* more of the same.
   - **Honest conclusion (stronger than a clean PASS):** the model gains significantly on legal retrieval, keeps **all** French + broad general capability, with a small, **quantified, understood** residual EN-financial trade-off. Domain-matched rehearsal is the documented next lever.
 
+### 2026-07-03 — Run 4 (scaled legal + domain-matched rehearsal) — ABORTED, with learnings
+
+Attempted **two levers at once**: scale the legal set 15k → 30k (~24k after dedup, via a new `LEXFR_SUBSET` passthrough) **and** domain-match the EN rehearsal to **GooAQ** (web-style Google QA, register closer to FiQA than Wikipedia-factoid NQ — never `BeIR/fiqa` itself, which would be training-on-eval). Both changes are committed on `feat/rehearsal-floor` (PR #11) and verified to load.
+
+- **Outcome: aborted (~$2.6, terminated manually, 0 orphan pods).** The run was **pathologically slow (~13 s/step)** then **stalled**.
+- **Why slow:** MatryoshkaLoss (5 nested dims = 5× loss compute) × CachedMNRL (batch 128 / mini 16) × BGE-M3 on one 4090, at ~24k pairs — Stage-1 alone (376 steps) took ~76 min.
+- **Why aborted:** at ~191 min the W&B **GPU utilisation dropped to 0 %** for ~9 min while stuck at Stage-2 step ~174/188 (before the BSARD-after encode) — a hang, not progress. Waiting for the 240-min `timeout` backstop was pointless (GPU idle + pre-`[after]` = no usable number even on a timeout-kill).
+- **Monitoring learning:** the decisive signal was W&B `system.gpu.0.gpu` (39 % → 0 % = working → stalled), not the watchdog uptime. `train/global_step` resets between the two stage trainers.
+- **Cheap fixes queued for a future scaled run:** cut Matryoshka to 2–3 dims (biggest lever), and/or fewer epochs / smaller effective batch; investigate the late-Stage-2 stall. The GooAQ + `LEXFR_SUBSET` machinery is ready — it just needs a leaner config to complete.
+- **Decision: finalise the mentor deliverables on run 3** — a complete, strong, honest result (legal +0.052, CI excludes zero; retention broadly improved; FiQA −0.026 residual understood). The scaled/domain-matched run is a **post-mentor optimisation, not a blocker.**
+
 ---
 
 ## 4. Consolidated decisions
