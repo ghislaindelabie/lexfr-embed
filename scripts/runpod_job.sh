@@ -41,7 +41,12 @@ trap selfterminate EXIT
 cd /workspace/lexfr || { echo "[job] repo missing"; exit 1; }
 export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 
-# pin the image's torch so pip never swaps it (Kaggle lesson)
+# The base image ships torch 2.4; transformers requires torch>=2.6 to load BGE-M3's .bin
+# weights (CVE-2025-32434). Upgrade within the same CUDA family (image is cuda12.4.1 -> cu124).
+echo "[job] ===== upgrading torch>=2.6 (cu124) for BGE-M3 .bin loading ====="
+pip install -q -U "torch>=2.6" --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -2
+
+# now pin the (upgraded) torch so later pip installs never swap it (Kaggle lesson)
 python - <<'PY'
 import pathlib, torch
 pathlib.Path("/tmp/tc.txt").write_text(f"torch=={torch.__version__}\n")
