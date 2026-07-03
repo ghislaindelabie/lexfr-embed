@@ -149,7 +149,23 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
 
 - **Defensible headline:** the gain is statistically real (CI excludes zero) and above the MDE, measured with a frozen+hashed BSARD partition. Cost ~$0.65 total (incl. fast-fails); pod self-terminated; 0 orphan pods.
 - **Honest finding:** this full two-stage @512 (0.290) ≈ the Phase-0 Kaggle **Stage-1-only** @512 (0.292) → **Stage-2 hard-negatives added nothing measurable on this subset** (within noise). Not a failure — a measured result that points Phase-1 work at *more data / better negative filtering / margin tuning* (backlog L1/L4) rather than assuming Stage-2 helps.
-- **Retention guard (Axis-3):** launched as a second RunPod run (`RUN_RETENTION=1`) — base-vs-fine-tuned on the non-legal MTEB(fr)+BEIR subset, ±0.02 tolerance. *(Result pending; append when it lands.)*
+- **Retention guard (Axis-3), second RunPod run (`RUN_RETENTION=1`, ~40 min):** base-vs-fine-tuned on the non-legal MTEB(fr)+BEIR subset, ±0.02 tolerance. **Verdict: FAIL — 1 of 7 tasks regressed.**
+
+| Task | Lang | Before → After | Δ | Status |
+|---|---|---|---|---|
+| AlloprofRetrieval | FR | 0.490 → 0.475 | −0.015 | ok |
+| MintakaRetrieval | FR | 0.222 → 0.234 | +0.012 | ok |
+| SciFact | EN | 0.644 → 0.638 | −0.006 | ok |
+| **FiQA2018** | EN | **0.413 → 0.385** | **−0.028** | ⚠️ **REGRESSED** |
+| STSBenchmarkMultilingualSTS | FR | 0.824 → 0.842 | +0.018 | ok |
+| SICKFr | FR | 0.785 → 0.784 | −0.001 | ok |
+| AlloProfClusteringS2S | FR | 0.359 → 0.344 | −0.015 | ok |
+
+  - **Every French task held; STS improved.** The one regression is **English financial QA** — the most out-of-domain task for a French-legal fine-tune — just past the ±0.020 tolerance.
+  - **Root cause (confirmed):** `rehearsal_frac = 0.07` is defined in `config.py` but **never used in `train.py`** (zero references) — training ran on LegalKit pairs only, with no general-domain rehearsal floor.
+  - **Fix (scoped, = the always-planned MVP insurance):** wire ~7% MS-MARCO/MIRACL FR/EN rehearsal into Stage-1 (TDD) → re-run → expect PASS. (Or narrow the guard, since EN finance is irrelevant to a French-legal product — but rehearsal is the principled fix.)
+  - This run also **reproduced the BSARD headline**: 0.240 → **0.284** (Δ +0.044, CI [+0.021, +0.067], excludes zero) vs +0.050 in run 1 — two significant runs, ~+0.047 average.
+  - **Takeaway for the defence:** the FAIL is a *feature* — the catastrophic-forgetting guard demonstrably works (it caught a real, mild regression on the single most distant task), the root cause is precise, and the fix is defined. Strong evidence for the BC03/BC05 evaluation blocks.
 
 ---
 
