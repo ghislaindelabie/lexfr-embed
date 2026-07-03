@@ -45,6 +45,9 @@ export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 # weights (CVE-2025-32434). Upgrade within the same CUDA family (image is cuda12.4.1 -> cu124).
 echo "[job] ===== upgrading torch>=2.6 (cu124) for BGE-M3 .bin loading ====="
 pip install -q -U "torch>=2.6" --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -2
+# torch 2.6 breaks the image's torch-2.4 torchvision (ABI: 'operator torchvision::nms does not exist'),
+# which cascades into a transformers import failure. A text embedder needs neither -> remove them.
+pip uninstall -y -q torchvision torchaudio 2>/dev/null || true
 
 # now pin the (upgraded) torch so later pip installs never swap it (Kaggle lesson)
 python - <<'PY'
