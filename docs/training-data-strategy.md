@@ -4,6 +4,8 @@
 
 > **Status: proposal with open decisions** (see §8). Nothing here is locked until you sign off the MVP scope.
 
+> **⚠️ Update (2026-06-25) — primary use-case correction.** The main users are **legal professionals + querying agents** (professional register, citation/graph expectations), **not laypeople**; lay-question→article is a *later* phase. This re-frames evaluation: the headline is now **professional query→article + graph relatedness**, and the lay sets (BSARD, service-public) become a **secondary "robustness" axis** — see the revised [`data-and-evaluation.md`](data-and-evaluation.md) and [`eval-set-spec.md`](eval-set-spec.md) for the four-axis suite. It also **upgrades the renvoi / citation-graph idea from "auxiliary" to "on-axis"** (professionals/agents leverage the graph) — though **code *hierarchy* is the higher-priority, evidence-backed structural lever** (G-DSR/BSARD: mAP 35→47), logged as flagship **L5** in [`optimization-backlog.md`](optimization-backlog.md) ahead of the speculative renvoi (L12). The register framing in **R5 / §3 below predates this correction** (it treats lay as the headline); read it through the professional lens.
+
 ## TL;DR — verdict
 
 **BUILD, but ship a tight MVP first and hold the research-grade layers for Phase 2.** The original design was directionally right on every axis; the adversarial pass did not overturn a single verdict — it **falsified one load-bearing number**, showed several "literature-backed" framings are weaker than claimed, and proved the Phase-1 plan was **~2× over-scoped** for the ~9 working days to the 2026-07-07 OC submission. So the *justifications and sequencing* change more than the conclusions.

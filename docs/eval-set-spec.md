@@ -1,17 +1,34 @@
 # French-national legal-IR evaluation set — construction spec
 
-*For Léo's approval. No public French-**national** legal-IR benchmark exists (BSARD/LLeQA are Belgian), so we build a small, credible held-out set. Researched 2026-06-20.*
+*For Léo's approval. No public French-**national** legal-IR benchmark exists (BSARD/LLeQA are Belgian), so we build our own. **Revised 2026-06-25** to the corrected primary use-case: the headline is **professional query→article + graph relatedness**; lay-citizen sets are a secondary robustness axis. See [`data-and-evaluation.md`](data-and-evaluation.md) for the four-axis map.*
 
-## Design: two tracks, reported side by side
+## Tracks (build priority order)
 
-| Track | Role | Source | ~Size |
-|---|---|---|---|
-| **A — OOD, headline** | the number we defend | **service-public.fr fiches** (real citizen questions → cited Légifrance articles via `LienExterne`, Licence Ouverte 2.0, multi-label) **+ ~100 hand-curated practitioner queries** | ~250–350 queries |
-| **B — in-distribution, diagnostic** | overfitting check, clearly flagged | **held-out LegalKit slice** (LLM-generated queries → article) | ~200 queries |
+| Track | Role | Source | ~Size | Confound-free? |
+|---|---|---|---|---|
+| **P — professional query→article** | 🟦 **HEADLINE** (the job) | real/curated **professional** queries (jargon, citations, scenario+cite) **or** confound-controlled synthetic | ~150 (IR floor) | only if real/curated, or via different-generator control |
+| **G — graph / related-provisions** | 🟦 graph axis (agent use-case) | **extracted** citations/renvois as gold (GerDaLIR/CLERC style) | a few k pairs | ✅ yes (no LLM) |
+| **R — lay robustness** *(secondary)* | 🟦 "does it also handle laypeople" | **BSARD** (Belgian) + later service-public.fr fiches (`LienExterne`→Légifrance, Licence Ouverte 2.0, multi-label) | BSARD 222 / SP ~250 | ✅ (real lay) |
+| **B — synthetic diagnostic** | 🟦 overfitting check, *flagged* | held-out LegalKit slice (LLM-generated) | ~150–200 | ❌ diagnostic only |
 
-The **A↔B gap is itself a finding** (large gap ⇒ overfitting to the generator's phrasing).
+**The P↔B gap (and a same-generator vs different-generator gap on synthetic) is itself a finding** — it measures how much score is real skill vs generator-style memorisation.
 
-**Why this is enough:** IR methodology floor is ~50 queries (≥150 for good power); MLEB (2025 SOTA legal benchmark) ships NDCG@10 tasks of just **65–500 queries**. The binding constraint is **label quality + corpus realism**, not raw count.
+**Why small is enough:** IR floor ~50 queries (≥150 for decent power); MLEB (2025 SOTA legal benchmark) ships NDCG@10 tasks of just **65–500 queries**. Binding constraint = **label quality + register/realism**, not raw count.
+
+## Track P — the professional headline (the hard, unbuilt one)
+
+Real professional queries are scarce/private (same wall as the LDS corpus). Two viable paths, ideally combined:
+1. **Real/curated:** a small set of genuine practitioner queries (Léo / a jurist authors ~100–150), each mapped to gold `(code, num)` articles. Best signal; expensive.
+2. **Confound-controlled synthetic:** generate eval queries with a **different generator family than training** (and a professional persona), human-verify a sample, and **report the same-generator vs different-generator gap**. The gap quantifies generator-style inflation.
+
+Precedents: JuriFindIT (expert-authored), COLIEE (exam register). Register: jargon, abbreviations, article citations, elliptical phrasing — *not* full-sentence lay questions.
+
+## Track G — graph / related-provisions (confound-free)
+
+Use **real citations as relevance** (GerDaLIR/CLERC pattern): extract renvois between statutory articles (and citations in jurisprudence) → `(article, cited/related article)` gold pairs. Tests whether the model encodes the legal graph the agents traverse.
+- **Filter procedural/generic renvois** (*"sous réserve de l'article X"*) — they link topically-unrelated articles (false positives).
+- **Graph leakage control (critical):** pair-level disjointness is **not enough** — split the **graph** (disjoint article sets / connected components) so a train article never cites an eval article; dedup near-duplicate/consolidated articles.
+- This is a **doc↔doc** eval — a real capability axis, but **not a substitute for Track P** (a full article ≠ a short query).
 
 ## Corpus
 
@@ -19,29 +36,30 @@ Index the **full article set of the in-scope codes** (~10–30k articles — BSA
 
 ## Code coverage (report as a table; avoid travail/commerce skew)
 
-Civil · Travail · Pénal · Commerce · Consommation · Fiscal/monétaire (+ housing/social where service-public fiches are rich).
+Civil · Travail · Pénal · Commerce · Consommation · Fiscal/monétaire (+ housing/social where sources are rich).
 
 ## Labelling / verification
 
-1. Auto-extract `(fiche question, cited Légifrance article ids)` from the service-public XML `LienExterne` refs; (b)/(d) authored directly against Légifrance ids.
+1. **Track P:** authored/curated against Légifrance ids (real) or generated-then-verified (synthetic). **Track R (service-public):** auto-extract `(fiche question, cited Légifrance ids)` from the XML `LienExterne` refs. **Track G:** extract renvoi/citation edges.
 2. Normalise every label to `(code, article num)` — the same key LegalKit exposes.
-3. **Léo spot-checks 15–20 %** of Track A: confirm the cited article genuinely answers the question; drop fiches whose citation set is too broad. Record the clean/agreement rate.
-4. Treat Track A as **multi-label** (a query may have >1 relevant article).
+3. **Léo spot-checks 15–20%** of Tracks P and R: confirm the cited article genuinely answers the query; drop over-broad citation sets. Record the clean/agreement rate.
+4. Treat P and R as **multi-label** (a query may have >1 relevant article).
 
 ## Leakage control (critical — we train on LegalKit)
 
-- Build the set of `(code, num)` article ids used as **answers in the LegalKit training split**; for Track A **prefer queries whose gold articles are NOT in that set**; where overlap is unavoidable, **flag and report metrics with/without** them.
-- Track B is in-distribution by construction — partition by article id **and** row; label it synthetic.
-- Text-dedup eval queries vs training `output` strings; drop near-duplicates.
-- **Freeze + hash** the eval set; never used in training/HPO.
+- **Hard-exclude** (not merely "prefer") the headline eval's gold `(code, num)` ids from the LegalKit **training split**; report any unavoidable overlap only as a separate labelled secondary metric.
+- **Graph (Track G):** split by graph component (see Track G above), not by pair.
+- **Track B** is in-distribution by construction → partition by article id **and** row; flag synthetic; dedup synthetic queries vs training `output` strings **and** vs eval-set query text.
+- **Freeze + hash** every eval set before any mining/relabeling; never used in training/HPO.
+- **Whitelist:** BSARD and any NC/SA source are mechanically barred from the training / mining / consistency-filter / synthesis-seed indexes (LDS is commercial).
 
 ## Metrics
 
-**NDCG@10 + Recall@100** primary (MTEB/MLEB convention); also MRR, R@10. **Bootstrap confidence intervals** (sizes are above the IR floor but below the high-power regime). Report Track A and B side by side.
+**NDCG@10 + Recall@100** primary (MTEB/MLEB convention); also MRR, R@10. **Bootstrap confidence intervals** (sizes near the IR floor). Report all tracks side by side. **Power analysis:** compute the minimum detectable Δ at each track's size before declaring small deltas meaningful.
 
 ## General-capability retention (catastrophic-forgetting guard)
 
-Contrastive fine-tuning (MNRL) on a narrow *legal* distribution can degrade the model's **general** French/English behaviour — catastrophic forgetting / representation collapse toward legalese. The legal eval above will **not** catch this (it is legal-only). So every Phase-1 run also reports a **before-vs-after retention regression** on a small, fixed, strictly **non-legal** benchmark subset (MTEB(fr) + BEIR).
+Contrastive fine-tuning on narrow legal text can degrade **general** FR/EN behaviour; the legal tracks can't see it. So every run reports a **before→after retention regression** on a fixed, strictly **non-legal** MTEB(fr)+BEIR subset:
 
 | Family | Tasks (MTEB) | Why |
 |---|---|---|
@@ -50,31 +68,29 @@ Contrastive fine-tuning (MNRL) on a narrow *legal* distribution can degrade the 
 | **FR STS** | STSBenchmarkMultilingualSTS, SICKFr | semantic-geometry sanity check |
 | **FR clustering** | AlloProfClusteringS2S | optional extra signal |
 
-**Protocol:** score the base model, then the fine-tuned model, on the identical suite; report per-task Δ. **Acceptance:** the legal metric rises meaningfully **while** each general task drops by **no more than ±0.02** (absolute NDCG@10 / Spearman / V-measure ≈ within noise). A larger drop ⇒ over-specialised. Verify at the **deployed Matryoshka dim** (e.g. 256/512), not just full 1024.
-
-**If it regresses:** lower LR / fewer epochs · keep LoRA and report adapter-on vs adapter-off (toggling the adapter off recovers the base) · *rehearsal*: mix ~5–15 % general pairs (MS-MARCO / MIRACL slice) into training · or accept it *iff* the product only ever serves legal queries (state the scope explicitly).
-
-**Implementation:** `scripts/eval_general.py` (before/after deltas + PASS/FAIL, exit-code-gated) over `src/lexfr_embed/general_eval.py` (the suite + pure verdict logic, unit-tested in `tests/test_general_eval.py`); needs the `mteb` `eval` extra. The retention suite is deliberately **legal-free** (BSARD / Track A/B handled above). Bonus: an explicit forgetting check strengthens the OC evaluation blocks (BC03/BC05).
+**Acceptance:** the legal metric rises **while** each general task drops by **no more than ±0.02** (≈ noise) at the **deployed Matryoshka dim**. Larger drop ⇒ over-specialised → mitigate (lower LR / fewer epochs · LoRA adapter-on-vs-off · rehearsal ~5–25% *relevant* general pairs · checkpoint soup). **Implementation:** `scripts/eval_general.py` over `src/lexfr_embed/general_eval.py` (unit-tested; `mteb` `eval` extra). Strengthens OC blocks BC03/BC05.
 
 ## The "LLM-eval just rewards the generator's style" risk
 
-Real for us — training (LegalKit) and a tempting eval source share the LLM-query paradigm. STARD shows lay queries crater retrieval (R@100 ≈ 0.91) vs near-saturation on synthetic. Mitigations (all in the recipe): headline is non-synthetic (Track A); report both distributions; Léo spot-check; any synthetic augmentation uses a **different generator/prompt than LegalKit** + human verification; ID-level leakage filter.
+Real for us — training (LegalKit) and a tempting eval source share the LLM-query paradigm. STARD shows lay queries crater retrieval (R@100 ≈ 0.91) vs near-saturation on synthetic. **A train/eval split does NOT fix this** (the confound is shared *style*, not shared *items*). Mitigations: headline (Track P) is real/curated *or* different-generator-controlled with the gap reported; Track G is extraction-based (confound-free); Léo spot-check; any synthetic uses a **different generator/prompt than LegalKit** + human verification; ID-level + graph leakage filters.
 
 ## Limitations to state honestly in the report
 
-Purpose-built (not a community standard); Track A relevance is fiche-level/multi-label (coarser than single-article) and reflects service-public editorial coverage; Track B is synthetic/in-distribution (diagnostic only); sizes sit above the IR minimum but below high-power → report CIs, treat small deltas cautiously; coverage skewed to source-rich codes (show per-code breakdown).
+Track P is the hardest to source (real pro queries are private) and may lean on confound-controlled synthetic; Track G is doc↔doc (a capability, not the query→article job); Track R is lay + (BSARD) Belgian; sizes near the IR floor → report CIs; coverage skews to source-rich codes. Purpose-built, not a community standard.
 
 ## Checklist (Léo sign-off)
 
-- [ ] Corpus: full in-scope code articles (~10–30k), keyed by `(code, num)`
-- [ ] Track A: ~250–350 q (service-public fiches + ~100 hand-curated), multi-label
-- [ ] Track B: ~200 held-out LegalKit q, partitioned by id+row, flagged synthetic
-- [ ] Code-coverage table; no travail/commerce skew
-- [ ] Leakage filter (exclude/flag LegalKit-answer ids; text-dedup); freeze+hash
-- [ ] Léo verifies 15–20 % of Track A; record clean rate
-- [ ] NDCG@10 + R@100 (+MRR, R@10), bootstrap CIs, A vs B side by side
+- [ ] **Track P** (headline): ~150 professional queries — real/curated and/or different-generator-controlled synthetic; gold `(code,num)`; gap reported
+- [ ] **Track G**: extracted citation/renvoi pairs; procedural renvois filtered; **graph-split** (not pair-split)
+- [ ] **Track R** (secondary): BSARD + (later) service-public fiches, multi-label
+- [ ] **Track B**: held-out LegalKit, partitioned by id+row, flagged synthetic
+- [ ] Corpus: full in-scope code articles (~10–30k), keyed by `(code, num)`; code-coverage table
+- [ ] Leakage: hard-exclude headline ids; graph-split G; text-dedup; freeze+hash; NC/SA whitelist
+- [ ] Léo verifies 15–20% of P and R; record clean rate
+- [ ] NDCG@10 + R@100 (+MRR, R@10), bootstrap CIs, power analysis, all tracks side by side
+- [ ] Retention guard before/after at deployed dim
 - [ ] Limitations paragraph
 
 ## Sources
 
-BSARD (ACL 2022) · LLeQA (AAAI 2024) · STARD (EMNLP 2024 Findings) · GerDaLIR (NLLP 2021) · LegalBench-RAG (2024) · MLEB (2025) · IR power analyses (Webber; Buckley & Voorhees) · service-public.fr open data (Licence Ouverte 2.0, daily XML; "Textes de référence – Légifrance" linking since 2023) · LegalKit (`louisbrulenaudet/legalkit`).
+BSARD (ACL 2022) · LLeQA (AAAI 2024) · STARD (EMNLP 2024 Findings) · **GerDaLIR (NLLP 2021 — citation-as-relevance)** · **CLERC (NAACL 2025)** · G-DSR / "Finding the Law" (EACL 2023 — French/Belgian, hierarchy lever) · JuriFindIT (Findings-EACL 2026 — expert queries) · MLEB (2025) · IR power analyses (Webber; Buckley & Voorhees) · service-public.fr open data (Licence Ouverte 2.0) · LegalKit (`louisbrulenaudet/legalkit`).
