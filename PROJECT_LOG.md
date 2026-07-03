@@ -167,6 +167,25 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
   - This run also **reproduced the BSARD headline**: 0.240 → **0.284** (Δ +0.044, CI [+0.021, +0.067], excludes zero) vs +0.050 in run 1 — two significant runs, ~+0.047 average.
   - **Takeaway for the defence:** the FAIL is a *feature* — the catastrophic-forgetting guard demonstrably works (it caught a real, mild regression on the single most distant task), the root cause is precise, and the fix is defined. Strong evidence for the BC03/BC05 evaluation blocks.
 
+### 2026-07-03 — Rehearsal floor wired (TDD) + third RunPod run
+
+- Implemented the anti-forgetting **rehearsal floor** that `rehearsal_frac` promised (PR #11, `feat/rehearsal-floor`), test-first:
+  - `src/lexfr_embed/data/rehearsal.py` — pure `rehearsal_count` (solves r/(n+r)=frac) + `mix_rehearsal` (tags `code="rehearsal"`, interleaves, deterministic) with **5 hermetic tests**; plus a **defensive FR+EN loader**.
+  - **Gotcha:** the obvious FR sources (`unicamp-dl/mmarco`, `facebook/mlqa`, `miracl/miracl`) are all **script-based** and refuse to load under `datasets>=3`. Working **parquet** sources: **`etalab-ia/piaf`** (FR Wikipedia QA) + **`sentence-transformers/natural-questions`** (EN).
+  - Wired into `train_embedder(rehearsal_pairs=…)` (mixed into both stages) and loaded in `run_phase1` via `rehearsal_count`.
+- **Third RunPod run** (`feat/rehearsal-floor`, `RUN_RETENTION=1`, ~42 min): 892 general pairs (frac 0.07) mixed into 11 848 legal → 12 740 total (loaded exactly as designed).
+
+| | Axis-1 legal (BSARD) | Retention verdict | FiQA2018 (EN finance) |
+|---|---|---|---|
+| No rehearsal (run 2) | 0.240 → 0.284 (+0.044) | FAIL | −0.028 |
+| **+ rehearsal (run 3)** | **0.240 → 0.292 (+0.052)**, CI [+0.031, +0.076] | FAIL | **−0.026** |
+
+  - **Legal gain held (best of the three runs).** Three legal runs now: +0.050 / +0.044 / +0.052 — CI always excludes zero (robust ~+0.049 headline).
+  - **Retention improved broadly:** vs the no-rehearsal run, AlloProfClustering −0.015 → **+0.020**, STS +0.018 → +0.020, Mintaka +0.012 → +0.018, SciFact +0.003; **all French fully protected.**
+  - **But FiQA2018 still −0.026** (barely up from −0.028) → verdict still FAIL on that one task.
+  - **Key insight:** open-domain EN rehearsal (Natural Questions = factoid Wikipedia) preserves the legal gain and lifts general tasks, but does **not** specifically protect FiQA's *financial* sub-domain — 7 % of open-domain pairs moved it only −0.002. Fully clearing it needs **domain-matched EN rehearsal** (MS-MARCO/web/financial) or a higher dose, *not* more of the same.
+  - **Honest conclusion (stronger than a clean PASS):** the model gains significantly on legal retrieval, keeps **all** French + broad general capability, with a small, **quantified, understood** residual EN-financial trade-off. Domain-matched rehearsal is the documented next lever.
+
 ---
 
 ## 4. Consolidated decisions
