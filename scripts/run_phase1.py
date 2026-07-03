@@ -65,8 +65,13 @@ def main() -> None:
     mean_delta, lo, hi = paired_delta_ci(before, after, seed=settings.seed)
     sd = float(np.std(np.asarray(after) - np.asarray(before)))
     headline = {
-        "metric": "NDCG@10", "before": float(np.mean(before)), "after": float(np.mean(after)),
-        "delta": mean_delta, "ci": (lo, hi), "mde": min_detectable_effect(len(before), sd), "n": len(before),
+        "metric": "NDCG@10",
+        "before": float(np.mean(before)),
+        "after": float(np.mean(after)),
+        "delta": mean_delta,
+        "ci": (lo, hi),
+        "mde": min_detectable_effect(len(before), sd),
+        "n": len(before),
     }
     print(f"[after] NDCG@10 = {headline['after']:.4f} (Δ {mean_delta:+.4f}, CI [{lo:+.4f}, {hi:+.4f}])")
 

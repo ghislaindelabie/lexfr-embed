@@ -7,8 +7,13 @@ as 'within noise', mark retention regressions, and print the partition hashes.
 from lexfr_embed.scorecard import format_scorecard
 
 _HEADLINE_REAL = {
-    "metric": "NDCG@10", "before": 0.242, "after": 0.307, "delta": 0.065,
-    "ci": (0.02, 0.11), "mde": 0.035, "n": 222,
+    "metric": "NDCG@10",
+    "before": 0.242,
+    "after": 0.307,
+    "delta": 0.065,
+    "ci": (0.02, 0.11),
+    "mde": 0.035,
+    "n": 222,
 }
 
 

@@ -67,12 +67,18 @@ def per_query_ndcg_at_k(model, queries: dict, corpus: dict, relevant: dict, k: i
 
     cids, qids = list(corpus), list(queries)
     corpus_emb = model.encode(
-        [corpus[c] for c in cids], batch_size=batch_size, convert_to_tensor=True,
-        normalize_embeddings=True, show_progress_bar=True,
+        [corpus[c] for c in cids],
+        batch_size=batch_size,
+        convert_to_tensor=True,
+        normalize_embeddings=True,
+        show_progress_bar=True,
     )
     query_emb = model.encode(
-        [queries[q] for q in qids], batch_size=batch_size, convert_to_tensor=True,
-        normalize_embeddings=True, show_progress_bar=False,
+        [queries[q] for q in qids],
+        batch_size=batch_size,
+        convert_to_tensor=True,
+        normalize_embeddings=True,
+        show_progress_bar=False,
     )
     hits = util.semantic_search(query_emb, corpus_emb, top_k=k)
     return [ndcg_at_k([cids[h["corpus_id"]] for h in hits[i]], relevant.get(q, set()), k) for i, q in enumerate(qids)]
