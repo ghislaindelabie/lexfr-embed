@@ -45,19 +45,23 @@ class Settings(BaseSettings):
     results_dir: Path = REPO_ROOT / "results"
 
     # --- model choice ---
-    base_model_key: str = "qwen3-0.6b"  # Phase 0: set to "smoke"
+    base_model_key: str = "bge-m3"  # Phase-1 MVP base (fits 16GB full-FT/LoRA); "smoke"=MiniLM for the CPU wiring test
     matryoshka_dims: list[int] = [1024, 512, 256, 128, 64]
 
     # --- training hyperparameters (research §03 starting points) ---
     epochs_stage1: int = 2
     epochs_stage2: int = 1
-    batch_size: int = 64  # CachedMNRL decouples effective batch from VRAM
+    batch_size: int = 128  # effective batch (CachedMNRL decouples it from VRAM)
+    mini_batch_size: int = 16  # CachedMNRL per-step micro-batch — bounds VRAM
+    max_seq_len: int = 512  # training/eval sequence cap (Phase-0 tested 512 vs 1024; 512 is faster, 1024 a minor lever)
+    rehearsal_frac: float = 0.07  # general FR/EN pairs mixed in from run 1 (anti-forgetting floor)
     lr_full_ft: float = 2e-5
     lr_lora: float = 1e-4
     lora_r: int = 16
     lora_alpha: int = 32
     use_lora_above_params: float = 1e9  # LoRA for bases > ~1B params
     hard_neg_relative_margin: float = 0.05
+    use_cached_mnrl: bool = False  # Stage-1: plain MNRL default; CachedMNRL opt-in (gated on the CPU smoke)
     seed: int = 42
 
     # --- dataset sizing (research §03/§04) ---
@@ -70,8 +74,18 @@ class Settings(BaseSettings):
 
     @property
     def report_to(self) -> str:
-        """Graceful: W&B if a key is set, else off (mirrors the OC14 pattern)."""
-        return "wandb" if self.wandb_api_key else "none"
+        """Graceful: W&B only if a key is set AND wandb is importable (else off).
+
+        Checking importability (not just the key) keeps CPU/smoke runs working without the
+        `track` extra; the real run does `uv sync --extra track` to enable logging.
+        """
+        if not self.wandb_api_key:
+            return "none"
+        try:
+            import wandb  # noqa: F401
+        except ImportError:
+            return "none"
+        return "wandb"
 
 
 settings = Settings()

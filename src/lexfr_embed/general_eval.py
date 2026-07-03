@@ -35,7 +35,8 @@ class RetentionTask:
 # sanity check; one clustering task as an optional extra signal.
 GENERAL_TASKS: list[RetentionTask] = [
     RetentionTask("AlloprofRetrieval", "retrieval", "fr", "ndcg_at_10", "FR QA retrieval (education)"),
-    RetentionTask("SyntecRetrieval", "retrieval", "fr", "ndcg_at_10", "FR enterprise-doc retrieval"),
+    # NB: SyntecRetrieval was dropped — MTEB tags it domains=['Legal'] (Syntec collective agreement),
+    # so it is NOT valid in a strictly NON-legal retention guard (a legal fine-tune could *improve* it).
     RetentionTask("MintakaRetrieval", "retrieval", "fr", "ndcg_at_10", "FR open-domain QA retrieval"),
     RetentionTask("SciFact", "retrieval", "en", "ndcg_at_10", "EN scientific-claim retrieval (BEIR)"),
     RetentionTask("FiQA2018", "retrieval", "en", "ndcg_at_10", "EN financial QA retrieval (BEIR)"),
