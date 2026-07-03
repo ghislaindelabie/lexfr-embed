@@ -10,6 +10,9 @@ exec > >(tee -a /workspace/job.log) 2>&1   # capture everything from here on
 
 export WANDB_PROJECT="${WANDB_PROJECT:-lexfr-embed}" WANDB_MODE=online
 export HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
+# fit BGE-M3 on a 24GB card: CachedMNRL chunks the batch (mini_batch 16); reduce encode fragmentation
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export LEXFR_EMBED_USE_CACHED_MNRL=true
 echo "[job] start $(date -u) | WANDB key present: ${WANDB_API_KEY:+yes} | RUNPOD_POD_ID=${RUNPOD_POD_ID:-?}"
 nvidia-smi -L || echo "[job] WARN no nvidia-smi"
 

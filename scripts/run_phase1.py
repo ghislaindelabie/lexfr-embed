@@ -53,7 +53,7 @@ def main() -> None:
     # 3) ZERO-SHOT BASELINE (Axis-1 BEFORE) — a fresh encode we run, same config as AFTER.
     base = SentenceTransformer(settings.base_model_id)
     base.max_seq_length = settings.max_seq_len
-    before = per_query_ndcg_at_k(base, queries, corpus, relevant, k=10)
+    before = per_query_ndcg_at_k(base, queries, corpus, relevant, k=10, batch_size=16)
     print(f"[baseline] BSARD NDCG@10 zero-shot = {np.mean(before):.4f}")
 
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
@@ -61,7 +61,7 @@ def main() -> None:
     model = train_embedder(train_pairs=pairs, use_lora=use_lora, out_dir=str(results / "phase1"))
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.
-    after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10)
+    after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10, batch_size=16)
     mean_delta, lo, hi = paired_delta_ci(before, after, seed=settings.seed)
     sd = float(np.std(np.asarray(after) - np.asarray(before)))
     headline = {
