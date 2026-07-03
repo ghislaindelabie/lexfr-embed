@@ -2,7 +2,7 @@
 
 *A detailed trace of decisions, implementation steps, and intermediary results. Combines the working discussions, the validated results, and what is recorded in git. Chronological with consolidated tables at the end.*
 
-**Last updated:** 2026-06-24 · **Status:** Phase 0 complete (pipeline validated on free Kaggle GPUs); PRs #1–#3 merged; repo **public** (JOSS clock started, eligible ~2026-12-23); Phase 1 about to start.
+**Last updated:** 2026-07-03 · **Status:** **Phase 1 pipeline shipped + first real GPU run done.** PRs #1–#7 merged; full two-stage training pipeline built (TDD, 43 tests, CI green); first end-to-end RunPod run gives a defensible headline (**BSARD NDCG@10 0.240 → 0.290, 95% CI [+0.027, +0.073]**); retention guard running. Repo **public** (JOSS clock started, eligible ~2026-12-23). *(Sections 5–7 below predate the merges; see the 2026-07-03 entry in §3 for the current state.)*
 
 ---
 
@@ -119,6 +119,37 @@ Extensive local-GPU feasibility study for the P710 (Lenovo ThinkStation P710).
 - **Concern raised:** a LoRA legal fine-tune (contrastive MNRL on a narrow distribution) can erode the model's **general** French/English retrieval + semantic-similarity behaviour (catastrophic forgetting / representation collapse). The legal eval (BSARD + Track A/B) cannot detect this — it is legal-only.
 - **Decision (D13):** add a **before-vs-after general-capability retention check** on a small, fixed, strictly **non-legal** MTEB(fr)+BEIR subset (FR/EN retrieval + FR STS + 1 clustering); accept only if general scores drop **≤ ±0.02** while the legal metric rises. Also a credibility win for the OC eval blocks (BC03/BC05).
 - **Implemented (TDD):** `src/lexfr_embed/general_eval.py` (suite + pure verdict logic) with 8 hermetic unit tests in `tests/test_general_eval.py` (all pass, ruff clean) + `scripts/eval_general.py` (before/after deltas, PASS/FAIL, exit-code-gated); `mteb` added to the `eval` optional extra. Spec written into `docs/eval-set-spec.md` ("General-capability retention").
+
+### 2026-06-25 — Primary use-case correction (professionals, not laypeople)
+
+- **Correction:** the main users are **legal professionals + querying agents** (professional register, article citations, cross-reference/graph expectations) — **not** laypeople. Lay-citizen questions are a *later* phase. Consequence: BSARD (Belgian + lay) and the planned service-public Track A (lay) measure the *wrong register* for the headline → demoted to a **secondary "lay-robustness" axis**; the headline eval becomes **professional-register + graph/relatedness-aware** (to build, via citation-as-relevance). This upgrades the renvoi/citation-structure idea from auxiliary to *on-axis*.
+
+### 2026-06-25 → 07-02 — Phase-1 pipeline built (TDD) and hardened
+
+- Implemented the full **two-stage training pipeline** behind the earlier stubs, all test-first:
+  - `train.py` — Stage-1 MNRL (⊂ Matryoshka) → mine **1 filtered hard negative** → Stage-2 at half LR; **saves both checkpoints**; plain-MNRL default with **CachedMNRL opt-in** (`use_cached_mnrl`, mini-batch 16) to fit BGE-M3 on 24 GB; CPU/bf16-aware for smoke.
+  - `metrics.py` — `bootstrap_ci`, `paired_delta_ci`, `min_detectable_effect`, pure `ndcg_at_k`.
+  - `data/leakage.py` — canonical `(code,num)` ids, `hard_exclude`, order-independent SHA-256 `hash_partition`, NC/SA source whitelist.
+  - `scorecard.py` — honest renderer (CI + "excludes zero?", sub-MDE "within noise", retention regression, partition hashes).
+  - `evaluate.per_query_ndcg_at_k`, `scripts/run_phase1.py` (the graded driver).
+- **43 hermetic tests + a MiniLM/CPU two-stage smoke (both loss modes) + CI green.** The smoke caught & fixed 3 real bugs (bf16-on-CPU crash; Matryoshka silently dropped the full model dim; `report_to` needed wandb importable) and dropped SyntecRetrieval from the retention guard (MTEB tags it *Legal*, invalid for a non-legal guard).
+- **Honesty fix (critical):** the "0.240 → 0.307" headline was a **splice** (512 zero-shot + 1024 fine-tuned). True *within-config* deltas: **+0.052 @512** (0.240→0.292) and **+0.065 @1024** (0.242→0.307). All mentor-facing material corrected; trust checklist adopted (no splice, CI + excludes-zero, retention as "no regression > ±MDE", frozen+hashed partition, transfer-proxy caveat, measured-vs-inferred labels).
+- **PRs #1–#7 merged to `main`** (user explicitly authorised merging #6+#7 after CI turned green — the normal rule is user-merges-only).
+
+### 2026-07-03 — First real GPU run (RunPod RTX 4090) + reproducible harness
+
+- Built a **fire-and-forget RunPod harness** (`scripts/runpod_job.sh`, branch `ops/runpod-job`, **PR #9**): captures all output to `/workspace/job.log` and ships it to W&B on exit (diagnosable after self-terminate); **STAGE A GPU-smoke gate** (a tiny MiniLM CUDA train) *before* paying for the real run; **STAGE B** graded `run_phase1.py`; ships `scorecard.md` + `partition_hashes.json` to W&B; then self-terminates. `RUN_RETENTION=1` toggle adds the Axis-3 MTEB guard.
+- Bring-up cleared **5 real blockers** (all baked into the script): torch ≥ 2.6 cu124 for BGE-M3 `.bin` loading (CVE-2025-32434); remove torchvision/torchaudio (torch-2.6 ABI break cascades into a transformers import failure); CachedMNRL + encode batch 16 + `expandable_segments` for 24 GB OOM; single-quoted `docker_args` (GraphQL); take-first-available GPU loop (no 4090-community capacity).
+
+**Result — first full two-stage run on real GPU (within-config, n = 222):**
+
+| Run | Base / method | max_seq | NDCG@10 (zero-shot → fine-tuned) | 95% paired-bootstrap CI | MDE |
+|---|---|---|---|---|---|
+| RunPod-1 | BGE-M3 + LoRA, **two-stage + 1 hard neg** | 512 | **0.240 → 0.290** (Δ +0.050) | **[+0.027, +0.073]** — excludes zero | ±0.033 |
+
+- **Defensible headline:** the gain is statistically real (CI excludes zero) and above the MDE, measured with a frozen+hashed BSARD partition. Cost ~$0.65 total (incl. fast-fails); pod self-terminated; 0 orphan pods.
+- **Honest finding:** this full two-stage @512 (0.290) ≈ the Phase-0 Kaggle **Stage-1-only** @512 (0.292) → **Stage-2 hard-negatives added nothing measurable on this subset** (within noise). Not a failure — a measured result that points Phase-1 work at *more data / better negative filtering / margin tuning* (backlog L1/L4) rather than assuming Stage-2 helps.
+- **Retention guard (Axis-3):** launched as a second RunPod run (`RUN_RETENTION=1`) — base-vs-fine-tuned on the non-legal MTEB(fr)+BEIR subset, ±0.02 tolerance. *(Result pending; append when it lands.)*
 
 ---
 
