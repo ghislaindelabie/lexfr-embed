@@ -159,16 +159,19 @@ def train_embedder(
     gc.collect()
     _empty_cache()
 
-    # --- Stage 2: 1 mined hard negative, half LR ---
-    triplets = hard_negatives.mine(
-        train_pairs, model, num_negatives=1, relative_margin=settings.hard_neg_relative_margin
-    )
+    # --- Stage 2: mined hard negatives, half LR (num_negatives=0 -> plain pairs, isolates mining's value) ---
+    if settings.num_negatives > 0:
+        stage2_ds = hard_negatives.mine(
+            train_pairs, model, num_negatives=settings.num_negatives, relative_margin=settings.hard_neg_relative_margin
+        )
+    else:
+        stage2_ds = Dataset.from_dict(pairs_to_anchor_positive_dict(train_pairs))
     loss2 = make_stage1_loss(model)  # MNRL+Matryoshka also consumes (anchor, positive, negative)
     args2 = _device_adapt(stage_training_args(2, use_lora, f"{out_dir}/final"))
     if max_steps:
         args2["max_steps"] = max_steps
     SentenceTransformerTrainer(
-        model=model, args=SentenceTransformerTrainingArguments(**args2), train_dataset=triplets, loss=loss2
+        model=model, args=SentenceTransformerTrainingArguments(**args2), train_dataset=stage2_ds, loss=loss2
     ).train()
     model.save_pretrained(f"{out_dir}/final")
     return model

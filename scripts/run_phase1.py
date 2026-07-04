@@ -103,7 +103,25 @@ def main() -> None:
                 # MTEB reports one aggregate score per task -> no per-query MDE; use the ±0.02 tolerance.
                 retention.append({"task": t, "before": b[t], "after": a[t], "delta": a[t] - b[t], "mde": 0.02})
 
-    # 7) SCORECARD.
+    # 7) SCORECARD (human .md + machine-readable .json for the campaign orchestrator — never parse prose).
+    (results / "scorecard.json").write_text(
+        json.dumps(
+            {
+                "headline": {
+                    **headline,
+                    "ci_lo": headline["ci"][0],
+                    "ci_hi": headline["ci"][1],
+                    "excludes_zero": (headline["ci"][0] > 0) or (headline["ci"][1] < 0),
+                    "within_noise": abs(headline["delta"]) < headline["mde"],
+                },
+                "retention": retention,
+                "partition_hashes": hashes,
+            },
+            indent=2,
+            default=float,
+        ),
+        encoding="utf-8",
+    )
     md = format_scorecard(headline, retention, hashes)
     (results / "scorecard.md").write_text(md, encoding="utf-8")
     print("\n" + md)
