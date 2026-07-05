@@ -23,6 +23,7 @@ models/
 
 # Experiment tracking / notebooks
 wandb/
+artifacts/
 .ipynb_checkpoints/
 
 # OS

@@ -53,7 +53,7 @@ def main() -> None:
     # 3) ZERO-SHOT BASELINE (Axis-1 BEFORE) — a fresh encode we run, same config as AFTER.
     base = SentenceTransformer(settings.base_model_id)
     base.max_seq_length = settings.max_seq_len
-    before = per_query_ndcg_at_k(base, queries, corpus, relevant, k=10)
+    before = per_query_ndcg_at_k(base, queries, corpus, relevant, k=10, batch_size=16)
     print(f"[baseline] BSARD NDCG@10 zero-shot = {np.mean(before):.4f}")
 
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
@@ -61,7 +61,7 @@ def main() -> None:
     model = train_embedder(train_pairs=pairs, use_lora=use_lora, out_dir=str(results / "phase1"))
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.
-    after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10)
+    after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10, batch_size=16)
     mean_delta, lo, hi = paired_delta_ci(before, after, seed=settings.seed)
     sd = float(np.std(np.asarray(after) - np.asarray(before)))
     headline = {
@@ -78,10 +78,16 @@ def main() -> None:
     # 6) Axis-3 RETENTION GUARD (general FR/EN, non-legal). base vs fine-tuned on the fixed suite.
     retention: list[dict] = []
     if not args.skip_retention:
+        import torch
+
         from lexfr_embed.general_eval import run_mteb, task_names
 
-        b = run_mteb(SentenceTransformer(settings.base_model_id), output_folder=str(results / "mteb/base"))
-        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"))
+        if torch.cuda.is_available():  # release training-pass fragmentation before big MTEB encodes
+            torch.cuda.empty_cache()
+        # batch 16 so BGE-M3 encoding FiQA2018's ~57k-doc corpus fits a 24 GB card
+        base_model = SentenceTransformer(settings.base_model_id)
+        b = run_mteb(base_model, output_folder=str(results / "mteb/base"), batch_size=16)
+        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"), batch_size=16)
         for t in task_names():
             if t in b and t in a:
                 # MTEB reports one aggregate score per task -> no per-query MDE; use the ±0.02 tolerance.
