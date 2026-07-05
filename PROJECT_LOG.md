@@ -234,19 +234,18 @@ Attempted **two levers at once**: scale the legal set 15k → 30k (~24k after de
 
 ## 6. Known issues / open items
 
-- **No French-national eval set built yet** — spec is in `docs/eval-set-spec.md`, construction is Phase-1 work.
-- **Hard-negative mining and synthetic-query generation are stubs** — the two biggest Phase-1 levers, not yet implemented.
-- **BSARD is Belgian** — current numbers are cross-jurisdiction transfer; a French-national eval is needed for a defensible headline.
-- **BGE-M3 long-context edge under-tested** — max_seq capped at 512 on the T4 (1024 tried, minor gain); revisit on the local card.
-- **Phase-1 entrypoint not runnable yet** — `train.py` is a skeleton (raises `NotImplementedError`); `hard_negatives.mine()` and `synthetic_queries.{generate_queries,consistency_filter}` are stubs. The validated end-to-end path is `scripts/phase0_kaggle.py`.
-- **GPU bring-up undocumented** — the MSI 5060 Ti is Blackwell (sm_120) → needs a CUDA 12.8 / recent torch build (same class of issue as the Kaggle Pascal failure). No local bring-up checklist yet.
+- **Phase-1 pipeline is runnable** — `train.py` two-stage (MNRL⊂Matryoshka → mine 1 filtered hard neg → Stage-2, saves both checkpoints) is wired + **CPU-smoke-validated** (plain-MNRL default *and* CachedMNRL opt-in); `hard_negatives.mine()` implemented. Remaining: run it on a real GPU.
+- **No GPU yet** — the local 5060 Ti has **no NVIDIA driver** (torch 2.12.1+cu130, `cuda.is_available()==False`); needs **R580+/CUDA 13** (NOT cu128). **RunPod is set up + verified** as the fallback/parallel path.
+- **French professional / graph eval not built** — deferred to Phase 1.5+ per the narrow-honest MVP scope. The soutenance headline is **BSARD, a Belgian + lay *transfer proxy*** (stated as a load-bearing limitation), plus the retention guard.
+- **Synthetic-query generation still a stub** — deferred (Phase 2); the MVP trains on audited LegalKit only.
+- **Headline honesty** — the earlier `0.240→0.307` was a *splice* (512 zero-shot + 1024 fine-tuned); corrected everywhere to the within-config `0.242→0.307` @1024. No spliced number anywhere (per the trust checklist).
 
 ---
 
 ## 7. What's next
 
-- **Phase 1 (→ 2026-07-07):** implement Stage-2 hard negatives + synthetic/practitioner queries; scale to ~80–100k pairs + more epochs; compare base models (BGE-M3, Qwen3-0.6B, possibly e5-mistral); build the French-national eval set (Tracks A/B); **run the general-capability retention check (`scripts/eval_general.py`) before/after each run** (D13); quantize for deployment. Run serial overnight on the local 5060 Ti + RunPod burst for parallel sweeps.
-- **Phase 2 (post-deadline):** arXiv preprint (cs.CL + cs.IR) + HF model/dataset release; submit to NLLP 2026. **Publication strategy done** (11-agent adversarial workflow, 2026-06-23): 6 ranked plays, joint-top = P1 reframed NLLP resource paper (the confound-control diagnostic; doubles as the capstone) + P5 governance paper with Primavera de Filippi. Full plan: `~/vault/personal/projects/research-career/lexfr-embed-publication-strategy.md` (HTML `/doc/lexfr-embed-publication-strategy`).
+- **Now → soutenance (2026-07-06/07) — the graded run:** bring up a GPU (local driver or RunPod), then `uv sync --extra track --extra eval` + `uv run --extra eval python scripts/run_phase1.py` → `results/scorecard.md` (within-config BSARD before→after + paired-bootstrap CI + retention guard with per-task MDE + frozen partition hashes). W&B logs every run. Optional if runway: the Track-G citation probe. Governed by the adversarial **soutenance blueprint** (narrow-honest MVP + trust checklist).
+- **Phase 2 / summer — next-steps roadmap in `docs/optimization-backlog.md`:** hard-neg denoising, source-stratified batching, rehearsal-ratio + data-size ablations, base×method sweep, checkpoint-soup, the French professional + graph evals, EU-French. Then publication: arXiv + HF release, **NLLP 2026** (+ the de Filippi governance paper). Full strategy: `/doc/lexfr-embed-publication-strategy`.
 
 ---
 
