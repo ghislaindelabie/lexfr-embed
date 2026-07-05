@@ -2,7 +2,7 @@
 
 *A detailed trace of decisions, implementation steps, and intermediary results. Combines the working discussions, the validated results, and what is recorded in git. Chronological with consolidated tables at the end.*
 
-**Last updated:** 2026-07-03 · **Status:** **Phase 1 pipeline shipped + first real GPU run done.** PRs #1–#7 merged; full two-stage training pipeline built (TDD, 43 tests, CI green); first end-to-end RunPod run gives a defensible headline (**BSARD NDCG@10 0.240 → 0.290, 95% CI [+0.027, +0.073]**); retention guard running. Repo **public** (JOSS clock started, eligible ~2026-12-23). *(Sections 5–7 below predate the merges; see the 2026-07-03 entry in §3 for the current state.)*
+**Last updated:** 2026-07-05 · **Status:** **Local RTX 5060 Ti live; reproduction validated; 24 h sweep done → the EVAL is the bottleneck.** PRs #1–#13 merged. The BGE-M3 fine-tune (BSARD 0.240 → 0.282) is robust but **saturated on the n=222 proxy** (σ_run=0.005 vs MDE 0.032 — data/LR/epochs/hard-neg all within noise); a **zero-training reranker adds ~2×** (+0.105). Next investment = a **powered, on-register, held-out French-professional benchmark** + a **reranker/graph architecture**, not more sweeps. Repo **public** (JOSS clock ~2026-12-23). *(Sections 5–7 predate the merges; see the §3 dated entries for the current state.)*
 
 ---
 
@@ -196,6 +196,27 @@ Attempted **two levers at once**: scale the legal set 15k → 30k (~24k after de
 - **Monitoring learning:** the decisive signal was W&B `system.gpu.0.gpu` (39 % → 0 % = working → stalled), not the watchdog uptime. `train/global_step` resets between the two stage trainers.
 - **Cheap fixes queued for a future scaled run:** cut Matryoshka to 2–3 dims (biggest lever), and/or fewer epochs / smaller effective batch; investigate the late-Stage-2 stall. The GooAQ + `LEXFR_SUBSET` machinery is ready — it just needs a leaner config to complete.
 - **Decision: finalise the mentor deliverables on run 3** — a complete, strong, honest result (legal +0.052, CI excludes zero; retention broadly improved; FiQA −0.026 residual understood). The scaled/domain-matched run is a **post-mentor optimisation, not a blocker.**
+
+### 2026-07-04 — Local RTX 5060 Ti bring-up (Blackwell sm_120) + all PRs merged
+
+- Driver **`nvidia-driver-580-server-open` 580.159.03** (R580, CUDA 13; the **open** module is mandatory on Blackwell). Torch **`2.12.1+cu130`** already ships sm_120 — the earlier "cuda unavailable" was the **missing driver, not the wheel**. Secure Boot needed a one-time console step (MOK enrol / disable).
+- **Reproduction VALIDATED on the local card:** BGE-M3 two-stage @512 BSARD **0.240 → 0.282** vs RunPod 0.284 (within 0.2 pt; zero-shot + partition hashes identical). MiniLM 0.055 → 0.156. GPU baseline ~145 W, ≤79 °C, no thermal throttle.
+- New reusable tooling: `scripts/verify_gpu.py` (sm_120 gate), `scripts/gpu_telemetry.py` (nvidia-smi → CSV + W&B), `docs/local-gpu-runbook.md`; `p710-report` extended to capture GPU metrics.
+- **PRs #9 / #10 / #11 / #13 merged to `main`** (#10's PROJECT_LOG conflict resolved in an isolated worktree; the #9→#11 stack merged in order with merge commits). **MLflow: NOT added** (W&B covers tracking/registry/artifacts + GPU system-metrics; serving → HF TEI).
+
+### 2026-07-04→05 — Unattended 24 h sweep campaign + KEY FINDING: the eval is the bottleneck
+
+- Built `scripts/run_campaign.py` — fault-tolerant orchestrator (subprocess isolation, resume-by-ledger via config-hash, per-run timeout, GPU telemetry, ledger jsonl+csv, W&B summary, checkpoint cleanup, **NF-42 reproduction halt-gate**, stop-clock) + an 18-arm queue (noise-floor → data-volume → rehearsal → hp-screen → confirmatory). Dedicated W&B project **`lexfr-embed-sweeps`**. `run_phase1` now emits machine-readable `scorecard.json`; added a `num_negatives` knob.
+- **RESULT — the recipe is SATURATED on the proxy:** noise floor **σ_run = 0.005**, but BSARD **MDE ≈ 0.032** (n = 222) → data-volume (5k/20k/28k pairs), LR, epochs, and hard-neg 0-vs-1 all land **0.277–0.295, statistically indistinguishable**. The +0.05 fine-tune gain over zero-shot is robust; **second-order levers are within noise; hard-negative mining shows NO detectable lift.**
+- **Eval-expansion (the pivot, inference-only via `scripts/eval_extra.py`):**
+  - **Powered n = 1108** (BSARD train+test) halves MDE to **0.027** → the fine-tune gain becomes borderline-detectable (confirms the eval, not the recipe, was the limit).
+  - **Matryoshka:** the trained model degrades gracefully — **256-dim (0.246) beats the frozen base at full 1024-dim (0.240)**; 512-dim ≈ full. A concrete LDS serving-dim knob.
+  - **RERANKER (headline):** a zero-training cross-encoder (`bge-reranker-v2-m3`) on the **frozen** base gives **0.240 → 0.345 (+0.105, CI [+0.074,+0.140])** — ~2× the fine-tune; frozen+rerank ≈ finetuned+rerank → **retrieve-then-rerank dominates; deploy a reranker in LDS.**
+- **PROBLEMS + fixes (the endurance test surfaced real bugs — its purpose):**
+  1. Retention (MTEB) **OOM'd on 16 GB** (two BGE-M3 models resident + FiQA-57k encode — fit the 24 GB 4090, not the 16 GB 5060 Ti). Fixed **`ae54723`** (eval fine-tuned first → del + empty_cache → then base; batch 8). The 3 rehearsal arms are being recovered by a `run_campaign` resume.
+  2. Killing the orchestrator left an **orphan child** (SEQ-1024, own session, `start_new_session=True`) still on the GPU → cleaned. **Footgun logged: a negative-PGID `kill` can hit the caller's own shell (exit 144) — use `pkill -f <pattern>` instead.**
+  - Endurance: **18 h+ continuous, ≤79 °C, 0 thermal throttle, fault-tolerance proven** (3 OOMs caught + campaign continued).
+- **DECISIONS:** (a) **the EVAL is the bottleneck** → invest in a better benchmark, not more sweeps; (b) dropped the low-value SEQ-1024/DATA-full tail; (c) **architecture insight: a reranker + (future) graph/ontology beat marginal embedder tuning**; (d) launched an extended ~16 h research window (eval-expansion + rehearsal recovery + a data-driven roadmap) designed via ultracode. Investigations into a **better eval (field contribution)**, **training-data improvements**, and **graph/ontology** are in progress.
 
 ---
 
