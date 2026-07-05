@@ -50,6 +50,14 @@ def main() -> None:
     _ = hard_exclude(set(), set(bsard_gold))  # documents the discipline; LegalKit ids are a separate space
     print(f"[data] {len(pairs)} LegalKit pairs after dedup+stratify")
 
+    # 2b) REHEARSAL FLOOR (anti-forgetting): mix ~rehearsal_frac general FR/EN retrieval pairs in.
+    #     The Axis-3 guard showed legal-only training drifts the farthest capability (EN FiQA).
+    from lexfr_embed.data.rehearsal import load_rehearsal_pairs, rehearsal_count
+
+    k = rehearsal_count(len(pairs), settings.rehearsal_frac)
+    rehearsal = load_rehearsal_pairs(k, seed=settings.seed)
+    print(f"[rehearsal] target {k} general pairs (frac={settings.rehearsal_frac}); loaded {len(rehearsal)}")
+
     # 3) ZERO-SHOT BASELINE (Axis-1 BEFORE) — a fresh encode we run, same config as AFTER.
     base = SentenceTransformer(settings.base_model_id)
     base.max_seq_length = settings.max_seq_len
@@ -58,7 +66,9 @@ def main() -> None:
 
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
     use_lora = settings.base_model_key != "smoke"
-    model = train_embedder(train_pairs=pairs, use_lora=use_lora, out_dir=str(results / "phase1"))
+    model = train_embedder(
+        train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=str(results / "phase1")
+    )
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.
     after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10, batch_size=16)

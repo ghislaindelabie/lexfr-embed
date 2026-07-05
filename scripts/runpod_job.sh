@@ -83,14 +83,15 @@ assert os.path.exists("/tmp/gpu_smoke/final")
 wandb.log({"gpu_smoke_passed": 1}); run.finish(); print("[job] GPU SMOKE PASSED")
 PY
 
+SUBSET_ARG=""; [ -n "${LEXFR_SUBSET:-}" ] && SUBSET_ARG="--subset ${LEXFR_SUBSET}"  # scale the legal set from the launcher
 if [ "$RUN_RETENTION" = "1" ]; then
-  echo "[job] ===== STAGE B: graded run_phase1 WITH retention (BGE-M3 two-stage + BSARD + MTEB guard) ====="
+  echo "[job] ===== STAGE B: graded run_phase1 WITH retention (BGE-M3 two-stage + BSARD + MTEB guard) ${SUBSET_ARG} ====="
   export WANDB_NAME="phase1-retention"
-  timeout 12000 python scripts/run_phase1.py || echo "[job] run_phase1 non-zero — see log/scorecard"
+  timeout 14400 python scripts/run_phase1.py $SUBSET_ARG || echo "[job] run_phase1 non-zero — see log/scorecard"
 else
-  echo "[job] ===== STAGE B: graded run_phase1 --skip-retention (BGE-M3 two-stage + BSARD) ====="
+  echo "[job] ===== STAGE B: graded run_phase1 --skip-retention (BGE-M3 two-stage + BSARD) ${SUBSET_ARG} ====="
   export WANDB_NAME="phase1-train"
-  timeout 9000 python scripts/run_phase1.py --skip-retention || echo "[job] run_phase1 non-zero — see log/scorecard"
+  timeout 9000 python scripts/run_phase1.py --skip-retention $SUBSET_ARG || echo "[job] run_phase1 non-zero — see log/scorecard"
 fi
 
 echo "[job] ===== ship results to W&B ====="

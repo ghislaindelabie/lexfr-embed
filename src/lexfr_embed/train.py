@@ -94,12 +94,15 @@ def train_embedder(
     *,
     use_lora: bool = False,
     train_pairs: list[dict] | None = None,
+    rehearsal_pairs: list[dict] | None = None,
     out_dir: str | None = None,
     max_steps: int | None = None,
 ):
     """Two-stage train; returns the trained model and saves it to `<out_dir>/final`.
 
     `train_pairs`: optional in-memory [{anchor, positive}] (smoke). If None, loads LegalKit.
+    `rehearsal_pairs`: optional general (anchor, positive) pairs mixed in as an anti-forgetting
+    floor (see data/rehearsal.py); None = no rehearsal (the smoke path stays offline).
     `max_steps`: optional per-stage step cap (smoke). Stage-1 checkpoint saved to `<out_dir>/stage1`
     so the forgetting canary can run on it before Stage 2 spends compute.
     """
@@ -131,6 +134,13 @@ def train_embedder(
         from lexfr_embed.data.legalkit import load_legalkit
 
         train_pairs = load_legalkit(settings.phase0_subset)
+
+    if rehearsal_pairs:  # anti-forgetting floor — both stages then see general pairs too
+        from lexfr_embed.data.rehearsal import mix_rehearsal
+
+        n_legal = len(train_pairs)
+        train_pairs = mix_rehearsal(train_pairs, rehearsal_pairs, seed=settings.seed)
+        print(f"[rehearsal] mixed {len(train_pairs) - n_legal} general into {n_legal} legal -> {len(train_pairs)}")
 
     model = build_model(base_id, use_lora=use_lora)
 
