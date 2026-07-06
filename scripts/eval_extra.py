@@ -31,6 +31,13 @@ def load_split(split: str):
         from lexfr_embed.data.trackb import load_trackb
 
         return load_trackb()
+    if split == "trackb2":
+        # BM25-hard v2 artifact (see data/trackb_v2.py) — build once with scripts/build_trackb_v2.py
+        import gzip
+
+        with gzip.open("results/trackb_v2.json.gz", "rt", encoding="utf-8") as f:
+            d = json.load(f)
+        return d["queries"], d["corpus"], {q: set(r) for q, r in d["relevant"].items()}
     if split == "tax":
         # External FR professional (tax-law) retrieval eval — louisbrulenaudet/tax-retrieval-benchmark
         # (query, positive) pairs; NB Lemone-embed is a tax specialist -> home-turf advantage on this split.
