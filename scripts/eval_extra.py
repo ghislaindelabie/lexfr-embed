@@ -25,7 +25,22 @@ MATRYOSHKA = [1024, 512, 256, 128, 64]
 
 
 def load_split(split: str):
-    """BSARD split; 'traintest' = train(886)+test(222) merged (bigger n -> smaller MDE)."""
+    """BSARD split; 'traintest' = train(886)+test(222) merged (bigger n -> smaller MDE);
+    'trackb' = large leak-free held-out LegalKit eval (in-distribution, powered — see data.trackb)."""
+    if split == "trackb":
+        from lexfr_embed.data.trackb import load_trackb
+
+        return load_trackb()
+    if split == "tax":
+        # External FR professional (tax-law) retrieval eval — louisbrulenaudet/tax-retrieval-benchmark
+        # (query, positive) pairs; NB Lemone-embed is a tax specialist -> home-turf advantage on this split.
+        from datasets import load_dataset
+
+        from lexfr_embed.data.trackb import build_trackb_eval
+
+        ds = load_dataset("louisbrulenaudet/tax-retrieval-benchmark", "default", split="train")
+        pairs = [{"anchor": r["query"], "positive": r["positive"], "code": "Fiscal"} for r in ds]
+        return build_trackb_eval(pairs, n_queries=None)
     from lexfr_embed.evaluate import load_bsard
 
     if split != "traintest":
@@ -48,8 +63,8 @@ def load_model(spec: str):
     if spec == "bge-m3":
         m = SentenceTransformer("BAAI/bge-m3")
     else:
-        try:  # sentence-transformers can often reload the saved dir directly
-            m = SentenceTransformer(spec)
+        try:  # ST can reload a saved dir directly; trust_remote_code for custom-arch models (e.g. Lemone/GTE)
+            m = SentenceTransformer(spec, trust_remote_code=True)
         except Exception:  # fallback: base + PEFT adapter
             m = SentenceTransformer("BAAI/bge-m3")
             m.load_adapter(spec) if hasattr(m, "load_adapter") else m[0].auto_model.load_adapter(spec)
@@ -109,7 +124,14 @@ def mode_powered(model_spec, splits):
 
         mean, lo, hi = _bootstrap(ndcg)
         mde = min_detectable_effect(len(ndcg), float(np.std(ndcg)))
-        res[split] = {"n": len(ndcg), "ndcg10": mean, "ndcg_ci": [lo, hi], "mde": mde, "recall10": float(np.mean(rec))}
+        res[split] = {
+            "n": len(ndcg),
+            "ndcg10": mean,
+            "ndcg_ci": [lo, hi],
+            "mde": mde,
+            "recall10": float(np.mean(rec)),
+            "per_query": [round(float(x), 6) for x in ndcg],  # enables PAIRED cross-model deltas offline
+        }
         print(
             f"[powered] {model_spec} {split:9} n={len(ndcg):4d} NDCG@10={mean:.4f} "
             f"CI[{lo:.4f},{hi:.4f}] MDE={mde:.4f} R@10={np.mean(rec):.4f}"

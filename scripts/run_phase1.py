@@ -32,6 +32,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Phase-1 graded run (BSARD transfer proxy + retention guard).")
     ap.add_argument("--skip-retention", action="store_true", help="skip the MTEB retention guard (no data download)")
     ap.add_argument("--subset", type=int, default=settings.phase0_subset)
+    ap.add_argument(
+        "--out-dir", default=str(settings.results_dir / "phase1"), help="checkpoint output dir (default results/phase1)"
+    )
     args = ap.parse_args()
 
     results = settings.results_dir
@@ -67,7 +70,7 @@ def main() -> None:
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
     use_lora = settings.base_model_key != "smoke"
     model = train_embedder(
-        train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=str(results / "phase1")
+        train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=args.out_dir
     )
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.

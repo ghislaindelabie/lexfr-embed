@@ -161,8 +161,18 @@ def train_embedder(
 
     # --- Stage 2: mined hard negatives, half LR (num_negatives=0 -> plain pairs, isolates mining's value) ---
     if settings.num_negatives > 0:
+        denoiser = None
+        if settings.denoise_negatives:  # A1: cross-encoder false-negative filter (RocketQA-style)
+            from sentence_transformers import CrossEncoder
+
+            denoiser = CrossEncoder(settings.denoise_reranker_id, max_length=settings.max_seq_len)
         stage2_ds = hard_negatives.mine(
-            train_pairs, model, num_negatives=settings.num_negatives, relative_margin=settings.hard_neg_relative_margin
+            train_pairs,
+            model,
+            num_negatives=settings.num_negatives,
+            relative_margin=settings.hard_neg_relative_margin,
+            cross_encoder=denoiser,
+            max_score=settings.denoise_max_score,
         )
     else:
         stage2_ds = Dataset.from_dict(pairs_to_anchor_positive_dict(train_pairs))
