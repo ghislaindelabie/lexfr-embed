@@ -1,4 +1,4 @@
-.PHONY: install lint test smoke train eval demo clean
+.PHONY: install lint test smoke train eval distill-cache distill demo clean
 
 install:          ## sync deps (add extras: uv sync --extra dev --extra track)
 	uv sync --extra dev
@@ -18,6 +18,12 @@ train:            ## Phase-1 training entrypoint (configure via .env / config.py
 
 eval:             ## evaluate a model on BSARD + held-out set
 	uv run python -m lexfr_embed.evaluate
+
+distill-cache:    ## A1-bis: build the OFFLINE teacher distillation cache (inference-only, 16 GB-safe)
+	uv run --no-sync python scripts/build_distill_cache.py
+
+distill:          ## A1-bis: run the distill stage + before/after recall curve (needs the cache)
+	uv run --extra eval python scripts/run_distill.py
 
 demo:             ## launch the FastAPI /search demo (requires .[serve])
 	uv run uvicorn lexfr_embed.serve:app --reload --port 8000

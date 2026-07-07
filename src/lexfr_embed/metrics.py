@@ -23,6 +23,19 @@ def ndcg_at_k(ranked_ids: list, gold_ids: Iterable, k: int = 10) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
+def hit_at_k(ranked_ids: list, gold_ids: Iterable, k: int = 10) -> float:
+    """Pure hit@k for one query: 1.0 if ANY relevant id is in the top-k, else 0.0. Multi-label aware.
+
+    The recall-curve primitive for A1-bis (distillation success is judged on the hit@k curve, not
+    NDCG alone — see PROJECT_LOG): hit@k over k measures how deep a reranker gate must reach.
+    Returns 0.0 on empty gold (a query with no relevant doc can never be a hit).
+    """
+    gold = set(gold_ids)
+    if not gold:
+        return 0.0
+    return 1.0 if any(cid in gold for cid in ranked_ids[:k]) else 0.0
+
+
 def bootstrap_ci(scores, n_boot: int = 1000, seed: int = 42, alpha: float = 0.05) -> tuple[float, float]:
     """Percentile bootstrap CI for the MEAN of per-query scores. Returns (low, high)."""
     arr = np.asarray(scores, dtype=float)

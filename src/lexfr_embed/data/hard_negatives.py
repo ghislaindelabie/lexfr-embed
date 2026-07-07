@@ -68,3 +68,29 @@ def mine(
         if max_score is not None:
             kwargs["max_score"] = max_score
     return mine_hard_negatives(dataset, model, **kwargs)
+
+
+def mine_teacher_candidates(train_pairs, model, *, num_negatives: int = 1):
+    """A1-bis Step A: mine `num_negatives` top-K candidates per query with the STAGE-1 embedder ONLY.
+
+    Unlike `mine()`, this passes NO `cross_encoder` and NO `relative_margin`/`max_score` — the teacher
+    reranker scores candidates in a SEPARATE explicit pass (Step B), so distillation sees soft labels
+    for every candidate (including possible false negatives, which it handles softly). This split is the
+    mitigation for SILENT-BUG #1: `mine_hard_negatives` only re-scores with a `cross_encoder` when a
+    margin/`max_score` filter is set, so a naive `mine(..., cross_encoder=reranker)` with no filter would
+    silently emit EMBEDDER cosine sims — degenerating into embedder self-distillation. Returns an
+    `n-tuple` Dataset (anchor, positive, negative_1..K); ragged queries (< K negatives found) are dropped
+    by `mine_hard_negatives` itself.
+    """
+    from datasets import Dataset
+    from sentence_transformers.util import mine_hard_negatives
+
+    dataset = Dataset.from_dict(pairs_to_anchor_positive_dict(train_pairs))
+    return mine_hard_negatives(
+        dataset,
+        model,
+        num_negatives=num_negatives,
+        sampling_strategy="top",
+        output_format="n-tuple",
+        use_faiss=True,
+    )
