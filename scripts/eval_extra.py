@@ -8,10 +8,16 @@ Modes:
   matryoshka encode once, truncate to {1024,512,256,128,64} + renorm -> NDCG per dim (T3).
   rerank     dense top-100 -> cross-encoder (bge-reranker-v2-m3) re-rank -> NDCG before/after,
              paired bootstrap CI (T2, the "is fine-tuning worth it" counter-evidence).
+  recall_curve  hit@k over k=[1,5,10,20,50,100] + MRR@10 with a bootstrap CI per k, and (with
+             --reference <prior recall_curve JSON>) a PAIRED delta hit@5 vs that reference model.
+             The A1-bis lens: success = the distilled student's hit@5 lifts toward the pre-distill
+             hit@50 (a shallower reranker gate suffices) and paired Δhit@5 CI excludes zero.
 
-    uv run --no-sync python scripts/eval_extra.py --mode powered   --model bge-m3
-    uv run --no-sync python scripts/eval_extra.py --mode matryoshka --model <ckpt_dir>
-    uv run --no-sync python scripts/eval_extra.py --mode rerank     --model bge-m3 --split test
+    uv run --no-sync python scripts/eval_extra.py --mode powered      --model bge-m3
+    uv run --no-sync python scripts/eval_extra.py --mode matryoshka   --model <ckpt_dir>
+    uv run --no-sync python scripts/eval_extra.py --mode rerank       --model bge-m3 --split test
+    uv run --no-sync python scripts/eval_extra.py --mode recall_curve --model <ckpt> --splits trackb2,test \
+        --reference results/eval_extra/recall_curve_predistill.json
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ import time
 from pathlib import Path
 
 MATRYOSHKA = [1024, 512, 256, 128, 64]
+RECALL_KS = [1, 5, 10, 20, 50, 100]  # hit@k curve grid (A1-bis reranker-gate depth lens)
 
 
 def load_split(split: str):
@@ -221,12 +228,81 @@ def mode_rerank(model_spec, split):
     }
 
 
+def _reciprocal_rank(ranked_ids: list, gold: set, k: int = 10) -> float:
+    """Reciprocal rank of the first relevant id within the top-k (0.0 if none) -> feeds MRR@k."""
+    for rank, cid in enumerate(ranked_ids[:k], start=1):
+        if cid in gold:
+            return 1.0 / rank
+    return 0.0
+
+
+def mode_recall_curve(model_spec, splits, reference=None):
+    """hit@k curve + MRR@10 with a bootstrap CI per k, and an optional PAIRED Δhit@5 vs a reference.
+
+    Encodes corpus+queries once (normalized, exactly like `_recall_at_k`/`per_query_ndcg_at_k`), runs
+    one `semantic_search(top_k=max(RECALL_KS))`, then reuses the pure `metrics.hit_at_k`. Per-query hit
+    arrays are stored (like `mode_powered`'s per_query) so a later run can pair OFFLINE without loading
+    two models at once; `--reference` is a prior recall_curve JSON (the pre-distill fine-tuned checkpoint).
+    """
+    import numpy as np
+    from sentence_transformers import util
+
+    from lexfr_embed.metrics import bootstrap_ci, hit_at_k, paired_delta_ci
+
+    m = load_model(model_spec)
+    res = {}
+    for split in splits:
+        q, c, r = load_split(split)
+        cids, qids = list(c), list(q)
+        ce = m.encode(
+            [c[x] for x in cids],
+            batch_size=16,
+            convert_to_tensor=True,
+            normalize_embeddings=True,
+            show_progress_bar=True,
+        )
+        qe = m.encode(
+            [q[x] for x in qids],
+            batch_size=16,
+            convert_to_tensor=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        hits = util.semantic_search(qe, ce, top_k=max(RECALL_KS))
+        ranked = [[cids[h["corpus_id"]] for h in hits[i]] for i in range(len(qids))]
+        gold = [r.get(x, set()) for x in qids]
+        per_k = {k: [hit_at_k(ranked[i], gold[i], k) for i in range(len(qids))] for k in RECALL_KS}
+        rr10 = [_reciprocal_rank(ranked[i], gold[i], 10) for i in range(len(qids))]
+
+        curve = {}
+        for k in RECALL_KS:
+            lo, hi = bootstrap_ci(per_k[k])
+            curve[k] = {"hit": float(np.mean(per_k[k])), "ci": [lo, hi]}
+        entry = {
+            "n": len(qids),
+            "curve": curve,
+            "mrr10": float(np.mean(rr10)),
+            "per_query_hits": {k: per_k[k] for k in RECALL_KS},
+        }
+        if reference:  # paired Δhit@5 vs the reference model's stored per-query hits (same split order)
+            ref = json.loads(Path(reference).read_text(encoding="utf-8"))
+            ref_hits5 = ref["result"][split]["per_query_hits"]["5"]  # JSON keys are strings
+            d, lo, hi = paired_delta_ci(ref_hits5, per_k[5], seed=42)
+            entry["paired_delta_hit5"] = {"delta": d, "ci": [lo, hi], "excludes_zero": (lo > 0) or (hi < 0)}
+            print(f"[recall_curve] {model_spec} {split} Δhit@5 vs ref = {d:+.4f} CI[{lo:+.4f},{hi:+.4f}]")
+        res[split] = entry
+        curve_str = " ".join(f"h@{k}={curve[k]['hit']:.3f}" for k in RECALL_KS)
+        print(f"[recall_curve] {model_spec} {split:9} n={len(qids):4d} {curve_str} MRR@10={entry['mrr10']:.3f}")
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", required=True, choices=["powered", "matryoshka", "rerank"])
+    ap.add_argument("--mode", required=True, choices=["powered", "matryoshka", "rerank", "recall_curve"])
     ap.add_argument("--model", default="bge-m3", help="'bge-m3' or a checkpoint dir")
     ap.add_argument("--split", default="test", help="test | train | traintest")
-    ap.add_argument("--splits", default="test,traintest", help="comma list (powered mode)")
+    ap.add_argument("--splits", default="test,traintest", help="comma list (powered / recall_curve modes)")
+    ap.add_argument("--reference", default=None, help="recall_curve: prior recall_curve JSON for a paired Δhit@5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -235,6 +311,8 @@ def main():
         out = mode_powered(args.model, args.splits.split(","))
     elif args.mode == "matryoshka":
         out = mode_matryoshka(args.model, args.split)
+    elif args.mode == "recall_curve":
+        out = mode_recall_curve(args.model, args.splits.split(","), reference=args.reference)
     else:
         out = mode_rerank(args.model, args.split)
 

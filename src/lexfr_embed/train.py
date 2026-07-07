@@ -28,13 +28,20 @@ def stage_training_args(stage: int, lora: bool, out_dir: str) -> dict:
     """Pure: SentenceTransformerTrainingArguments kwargs for a stage.
 
     Stage 2 halves the LR and uses `epochs_stage2`; both stages bf16. LR depends on the LoRA flag.
+    Stage 3 is the A1-bis distill stage: its own `distill_epochs`/`distill_lr` (LR defaults to the LoRA
+    LR), but bf16/report_to/seed/warmup_ratio kept identical to 1/2 so it stays unit-tested the same way.
     """
-    lr = settings.lr_lora if lora else settings.lr_full_ft
-    if stage == 2:
-        lr = 0.5 * lr
+    if stage == 3:  # A1-bis distill stage
+        lr = settings.distill_lr
+        epochs = settings.distill_epochs
+    else:
+        lr = settings.lr_lora if lora else settings.lr_full_ft
+        if stage == 2:
+            lr = 0.5 * lr
+        epochs = settings.epochs_stage1 if stage == 1 else settings.epochs_stage2
     return {
         "output_dir": out_dir,
-        "num_train_epochs": settings.epochs_stage1 if stage == 1 else settings.epochs_stage2,
+        "num_train_epochs": epochs,
         "per_device_train_batch_size": settings.batch_size,
         "learning_rate": lr,
         "warmup_ratio": 0.1,
@@ -77,6 +84,17 @@ def make_stage1_loss(model):
     else:
         base = MultipleNegativesRankingLoss(model)
     return MatryoshkaLoss(model, base, matryoshka_dims=dims)
+
+
+def make_distill_loss(model):
+    """A1-bis distill loss (MarginMSE ± Matryoshka) — delegates to `distill.make_distill_loss`.
+
+    Kept as a thin re-export so `train.py` never imports the reranker/teacher: the distill stage
+    touches only bge-m3 + LoRA + the cached labels, so the 16 GB training budget is unchanged.
+    """
+    from lexfr_embed.distill import make_distill_loss as _make_distill_loss
+
+    return _make_distill_loss(model)
 
 
 def _empty_cache() -> None:
@@ -184,6 +202,85 @@ def train_embedder(
         model=model, args=SentenceTransformerTrainingArguments(**args2), train_dataset=stage2_ds, loss=loss2
     ).train()
     model.save_pretrained(f"{out_dir}/final")
+    return model
+
+
+def _assert_distill_cache_meta(cache_dir: str) -> dict:
+    """Load `<cache_dir>/meta.json` and fail loudly on any settings mismatch (cache/training alignment).
+
+    A silent mismatch (wrong K, wrong reranker, a cache built over a different LegalKit subset/seed)
+    would distill against the wrong positives/negatives and quietly understate the gain — so this is a
+    hard gate, not a warning (PROJECT_LOG risks "cache/training misalignment", "wrong/stale miner ckpt").
+    """
+    import json
+    from pathlib import Path
+
+    meta_path = Path(cache_dir) / "meta.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(
+            f"{meta_path} missing — build the teacher cache first: "
+            "uv run --no-sync python scripts/build_distill_cache.py"
+        )
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    checks = {
+        "num_negatives": settings.distill_num_negatives,
+        "reranker_id": settings.distill_reranker_id,
+        "subset_size": settings.phase0_subset,
+        "subset_seed": settings.seed,
+    }
+    mismatches = [f"{k}: cache={meta.get(k)!r} != settings={v!r}" for k, v in checks.items() if meta.get(k) != v]
+    if mismatches:
+        raise ValueError("distill cache / settings mismatch (rebuild the cache): " + "; ".join(mismatches))
+    return meta
+
+
+def distill_embedder(
+    *,
+    base_ckpt: str,
+    cache_dir: str,
+    out_dir: str,
+    use_lora: bool,
+    max_steps: int | None = None,
+):
+    """A1-bis: distill the teacher reranker's ranking into the embedder via cached MarginMSE labels.
+
+    (1) load the embedder from `base_ckpt` (the saved stage-1/2 checkpoint) + (re)attach LoRA via
+    `build_model`; (2) `load_from_disk(cache_dir)` and assert its `meta.json` matches `settings`
+    (fail loudly); (3) build the MarginMSE(+Matryoshka) loss; (4) run ONE stage-3 trainer pass and
+    save to `<out_dir>/distill`. The teacher reranker is NEVER imported here — training reads only the
+    cache, so the 16 GB budget is bge-m3 + LoRA + labels (no reranker co-residency).
+    """
+    import datasets
+    import torch
+    from sentence_transformers import (
+        SentenceTransformerTrainer,
+        SentenceTransformerTrainingArguments,
+    )
+
+    on_cpu = not torch.cuda.is_available()
+
+    def _device_adapt(a: dict) -> dict:
+        if on_cpu:  # bf16 is GPU-only; a CPU dry-run must fall back to fp32
+            a["bf16"] = False
+            a["use_cpu"] = True
+        return a
+
+    meta = _assert_distill_cache_meta(cache_dir)
+    print(
+        f"[distill] cache OK: {meta.get('n_rows')} rows, K={meta.get('num_negatives')}, "
+        f"teacher={meta.get('reranker_id')}"
+    )
+
+    model = build_model(base_ckpt, use_lora=use_lora)
+    ds = datasets.load_from_disk(cache_dir)
+    loss = make_distill_loss(model)
+    args = _device_adapt(stage_training_args(3, use_lora, f"{out_dir}/distill"))
+    if max_steps:
+        args["max_steps"] = max_steps
+    SentenceTransformerTrainer(
+        model=model, args=SentenceTransformerTrainingArguments(**args), train_dataset=ds, loss=loss
+    ).train()
+    model.save_pretrained(f"{out_dir}/distill")
     return model
 
 

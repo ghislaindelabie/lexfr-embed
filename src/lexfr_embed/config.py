@@ -68,6 +68,20 @@ class Settings(BaseSettings):
     use_cached_mnrl: bool = False  # Stage-1: plain MNRL default; CachedMNRL opt-in (gated on the CPU smoke)
     seed: int = 42
 
+    # --- A1-bis: reranker->embedder distillation (MarginMSE) — an ADDITIVE 3rd recipe, not a Stage-2 replacement.
+    # Teacher pass is OFFLINE + inference-only (scripts/build_distill_cache.py); training reads only the cache,
+    # so the reranker never co-resides with the training graph (16 GB-safe). Knobs mirror the A1 denoise_* family.
+    distill: bool = False  # master switch for the distill stage (mirrors denoise_negatives)
+    distill_reranker_id: str = "BAAI/bge-reranker-v2-m3"  # teacher cross-encoder (mirrors denoise_reranker_id)
+    distill_num_negatives: int = 1  # teacher candidates per query; FIRST version = 1 (mirrors num_negatives)
+    distill_miner_ckpt: str = str(REPO_ROOT / "results" / "phase1" / "stage1")  # stage-1 embedder that mines candidates
+    distill_cache_dir: Path = REPO_ROOT / "results" / "distill_cache"  # teacher pass writes / trainer reads
+    distill_teacher_activation: str = "sigmoid"  # EXPLICIT teacher score transform (never rely on CrossEncoder default)
+    distill_student_sim: str = "cos"  # MarginMSE similarity_fct: cos (default) | dot
+    distill_matryoshka: bool = True  # wrap MarginMSE in MatryoshkaLoss like make_stage1_loss
+    distill_epochs: int = 1  # distill-stage epochs (separate from epochs_stage1/2)
+    distill_lr: float = 1e-4  # distill-stage LR (defaults to the LoRA LR; a full-FT run can lower it)
+
     # --- dataset sizing (research §03/§04) ---
     target_pairs: int = 90_000  # ~80–100k cap; Phase 0 uses a small subset
     phase0_subset: int = 15_000

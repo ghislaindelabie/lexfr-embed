@@ -37,6 +37,18 @@ def test_lr_depends_on_lora_flag():
     assert stage_training_args(1, lora=False, out_dir="x")["learning_rate"] == settings.lr_full_ft
 
 
+def test_stage3_distill_training_args():
+    """A1-bis distill stage (stage 3): own epochs/LR, but bf16/seed/report_to/warmup identical to 1/2."""
+    a1 = stage_training_args(1, lora=True, out_dir="x")
+    a3 = stage_training_args(3, lora=True, out_dir="x")
+    assert a3["num_train_epochs"] == settings.distill_epochs
+    assert a3["learning_rate"] == settings.distill_lr
+    assert a3["bf16"] is True
+    assert a3["seed"] == a1["seed"] == settings.seed
+    assert a3["report_to"] == a1["report_to"]
+    assert a3["warmup_ratio"] == a1["warmup_ratio"]
+
+
 @pytest.mark.smoke
 def test_two_stage_smoke_minilm_cpu(tmp_path):
     """Full two-stage path on MiniLM (CPU) + varied toy pairs: proves wiring, mining, and SAVE.
