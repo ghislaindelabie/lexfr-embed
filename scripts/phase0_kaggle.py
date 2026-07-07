@@ -192,7 +192,27 @@ def main() -> None:
         seed=SEED,
     )
     trainer = SentenceTransformerTrainer(model=model, args=args, train_dataset=train_ds, loss=loss)
+
+    # --- timed training (matched 5060 Ti vs T4 benchmark; same script both sides) ---
+    import time as _time
+
+    import torch as _t
+
+    gpu = _t.cuda.get_device_name(0) if _t.cuda.is_available() else "cpu"
+    if _t.cuda.is_available():
+        _t.cuda.reset_peak_memory_stats()
+    _t0 = _time.perf_counter()
     trainer.train()
+    if _t.cuda.is_available():
+        _t.cuda.synchronize()
+    train_wall_s = _time.perf_counter() - _t0
+    vram_gb = _t.cuda.max_memory_allocated() / 1e9 if _t.cuda.is_available() else 0.0
+    n_samples = len(train_ds) * EPOCHS
+    print(
+        f"BENCH gpu={gpu!r} pairs={len(train_ds)} epochs={EPOCHS} bs={BATCH_SIZE} seq={MAX_SEQ_LEN} "
+        f"train_wall_s={train_wall_s:.1f} samples_per_s={n_samples / train_wall_s:.2f} "
+        f"peak_vram_gb={vram_gb:.2f} torch={_t.__version__}"
+    )
 
     # free training memory (optimizer/grads) before the final eval encode — avoids T4 OOM
     import gc

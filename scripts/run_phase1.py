@@ -32,6 +32,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Phase-1 graded run (BSARD transfer proxy + retention guard).")
     ap.add_argument("--skip-retention", action="store_true", help="skip the MTEB retention guard (no data download)")
     ap.add_argument("--subset", type=int, default=settings.phase0_subset)
+    ap.add_argument(
+        "--out-dir", default=str(settings.results_dir / "phase1"), help="checkpoint output dir (default results/phase1)"
+    )
     args = ap.parse_args()
 
     results = settings.results_dir
@@ -66,9 +69,7 @@ def main() -> None:
 
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
     use_lora = settings.base_model_key != "smoke"
-    model = train_embedder(
-        train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=str(results / "phase1")
-    )
+    model = train_embedder(train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=args.out_dir)
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.
     after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10, batch_size=16)
@@ -92,18 +93,41 @@ def main() -> None:
 
         from lexfr_embed.general_eval import run_mteb, task_names
 
-        if torch.cuda.is_available():  # release training-pass fragmentation before big MTEB encodes
+        # 16 GB card: eval the fine-tuned model FIRST, free it, THEN load+eval base — never two BGE-M3
+        # models resident at once; batch 8 bounds the FiQA2018 (~57k-doc) encode. (24 GB fit 2 @16.)
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        # batch 16 so BGE-M3 encoding FiQA2018's ~57k-doc corpus fits a 24 GB card
+        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"), batch_size=8)
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         base_model = SentenceTransformer(settings.base_model_id)
-        b = run_mteb(base_model, output_folder=str(results / "mteb/base"), batch_size=16)
-        a = run_mteb(model, output_folder=str(results / "mteb/finetuned"), batch_size=16)
+        base_model.max_seq_length = settings.max_seq_len
+        b = run_mteb(base_model, output_folder=str(results / "mteb/base"), batch_size=8)
         for t in task_names():
             if t in b and t in a:
                 # MTEB reports one aggregate score per task -> no per-query MDE; use the ±0.02 tolerance.
                 retention.append({"task": t, "before": b[t], "after": a[t], "delta": a[t] - b[t], "mde": 0.02})
 
-    # 7) SCORECARD.
+    # 7) SCORECARD (human .md + machine-readable .json for the campaign orchestrator — never parse prose).
+    (results / "scorecard.json").write_text(
+        json.dumps(
+            {
+                "headline": {
+                    **headline,
+                    "ci_lo": headline["ci"][0],
+                    "ci_hi": headline["ci"][1],
+                    "excludes_zero": (headline["ci"][0] > 0) or (headline["ci"][1] < 0),
+                    "within_noise": abs(headline["delta"]) < headline["mde"],
+                },
+                "retention": retention,
+                "partition_hashes": hashes,
+            },
+            indent=2,
+            default=float,
+        ),
+        encoding="utf-8",
+    )
     md = format_scorecard(headline, retention, hashes)
     (results / "scorecard.md").write_text(md, encoding="utf-8")
     print("\n" + md)

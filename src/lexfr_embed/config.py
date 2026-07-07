@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     lora_alpha: int = 32
     use_lora_above_params: float = 1e9  # LoRA for bases > ~1B params
     hard_neg_relative_margin: float = 0.05
+    num_negatives: int = 1  # Stage-2 mined hard negatives per pair; 0 = plain pairs (isolates mining's value)
+    denoise_negatives: bool = False  # A1: rescore mined negatives with a cross-encoder, drop false negatives (RocketQA)
+    denoise_reranker_id: str = "BAAI/bge-reranker-v2-m3"  # A1 cross-encoder (different family than the embedder)
+    denoise_max_score: float | None = None  # A1: optional hard cap on reranker score above which a candidate is dropped
     use_cached_mnrl: bool = False  # Stage-1: plain MNRL default; CachedMNRL opt-in (gated on the CPU smoke)
     seed: int = 42
 
