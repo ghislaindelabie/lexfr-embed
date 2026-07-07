@@ -197,6 +197,7 @@ def main() -> None:
     import time as _time
 
     import torch as _t
+
     gpu = _t.cuda.get_device_name(0) if _t.cuda.is_available() else "cpu"
     if _t.cuda.is_available():
         _t.cuda.reset_peak_memory_stats()

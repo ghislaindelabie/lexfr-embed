@@ -72,9 +72,8 @@ def build_trackb():
     cache = CACHE / "trackb_built.pkl"
     if cache.exists():
         return pickle.loads(cache.read_bytes())
-    from lexfr_embed.data.legalkit import stratify_by_code
+    from lexfr_embed.data.legalkit import load_legalkit, stratify_by_code
     from lexfr_embed.data.trackb import build_holdout, trained_ids
-    from lexfr_embed.data.legalkit import load_legalkit
 
     all_pairs = load_legalkit(None)
     held = build_holdout(all_pairs, trained_ids())
@@ -153,7 +152,6 @@ def analysis_overlap(data, rng, n_sample):
     corpus_texts = data["corpus_texts"]
     n_q = len(data["q_anchor"])
     idx = rng.sample(range(n_q), min(n_sample, n_q))
-    corpus_cw = None  # lazy: only need random targets
 
     gold_cont, rand_cont = [], []
     N = len(corpus_texts)
@@ -176,7 +174,9 @@ def analysis_overlap(data, rng, n_sample):
         "random_containment": quartiles(rand_cont),
         "gold_minus_random_mean": float(statistics.mean(gold_cont) - statistics.mean(rand_cont)),
         "_sample_idx": idx,
-        "_gold_cont_by_sample": {qi: gc for qi, gc in zip(idx, gold_cont)} if len(idx) == len(gold_cont) else None,
+        "_gold_cont_by_sample": {qi: gc for qi, gc in zip(idx, gold_cont, strict=False)}
+        if len(idx) == len(gold_cont)
+        else None,
     }
 
 
@@ -225,7 +225,7 @@ def analysis_neardup(data, vec, Xc, thresh=0.8, batch=256):
     gold_idx = sorted(set(data["q_gold_idx"]))
     g = np.asarray(gold_idx)
     Xg = Xc[g]
-    N = Xc.shape[0]
+    Xc.shape[0]
     has_dup = np.zeros(len(g), dtype=bool)
     max_nb = np.zeros(len(g), dtype=np.float32)
     for s in range(0, len(g), batch):
@@ -257,10 +257,8 @@ def analysis_difficulty(data, tf, overlap):
     corpus_texts = data["corpus_texts"]
     cont = np.array(
         [
-            (lambda qcw: (len(qcw & content_words(corpus_texts[gi])) / len(qcw)) if qcw else 0.0)(
-                content_words(a)
-            )
-            for a, gi in zip(data["q_anchor"], data["q_gold_idx"])
+            (lambda qcw: (len(qcw & content_words(corpus_texts[gi])) / len(qcw)) if qcw else 0.0)(content_words(a))
+            for a, gi in zip(data["q_anchor"], data["q_gold_idx"], strict=False)
         ]
     )
 
@@ -310,7 +308,7 @@ def run_split(name, data, rng):
 
     ov = analysis_overlap(data, rng, N_SAMPLE)
     sample_idx = ov.pop("_sample_idx")
-    gold_cont_by_sample = ov.pop("_gold_cont_by_sample")
+    ov.pop("_gold_cont_by_sample")
     res["overlap"] = ov
 
     tf = tfidf_retrieve(data)
@@ -376,24 +374,34 @@ def main():
         r = out[split]
         line(f"\n===== {split.upper()} (n_q={r['n_queries']}, corpus={r['n_corpus']}) =====")
         o = r["overlap"]
-        line(f"  content-word containment  gold: mean={o['gold_containment']['mean']:.3f} "
-             f"median={o['gold_containment']['median']:.3f} "
-             f"[q1={o['gold_containment']['q1']:.3f} q3={o['gold_containment']['q3']:.3f}]")
-        line(f"  content-word containment  rand: mean={o['random_containment']['mean']:.3f} "
-             f"median={o['random_containment']['median']:.3f}")
+        line(
+            f"  content-word containment  gold: mean={o['gold_containment']['mean']:.3f} "
+            f"median={o['gold_containment']['median']:.3f} "
+            f"[q1={o['gold_containment']['q1']:.3f} q3={o['gold_containment']['q3']:.3f}]"
+        )
+        line(
+            f"  content-word containment  rand: mean={o['random_containment']['mean']:.3f} "
+            f"median={o['random_containment']['median']:.3f}"
+        )
         line(f"  gold - random (mean)          : {o['gold_minus_random_mean']:.3f}")
         t = r["tfidf_ceiling"]["full_set"]
-        line(f"  TF-IDF (zero-ML) full-set     : top1={t['top1_acc']:.3f}  R@10={t['recall_at_10']:.3f}  "
-             f"fail@10={t['fail_rate_at_10']:.3f}")
+        line(
+            f"  TF-IDF (zero-ML) full-set     : top1={t['top1_acc']:.3f}  R@10={t['recall_at_10']:.3f}  "
+            f"fail@10={t['fail_rate_at_10']:.3f}"
+        )
         nd = r["neardup"]
-        line(f"  near-dup gold (cos>0.8)       : {nd['frac_gold_with_neardup_gt0.8']:.3f}  "
-             f"(>0.9={nd['frac_gold_with_neardup_gt0.9']:.3f})  mean_maxnb={nd['mean_max_neighbor_cos']:.3f}")
+        line(
+            f"  near-dup gold (cos>0.8)       : {nd['frac_gold_with_neardup_gt0.8']:.3f}  "
+            f"(>0.9={nd['frac_gold_with_neardup_gt0.9']:.3f})  mean_maxnb={nd['mean_max_neighbor_cos']:.3f}"
+        )
         d = r["difficulty"]["tfidf_fail_at_k"]
-        line(f"  TF-IDF failures @10           : {d['count']} ({d['frac_of_all']:.3f})  "
-             f"mean_qlen={d['mean_query_len']}  cites_art={d['frac_query_cites_article']}")
+        line(
+            f"  TF-IDF failures @10           : {d['count']} ({d['frac_of_all']:.3f})  "
+            f"mean_qlen={d['mean_query_len']}  cites_art={d['frac_query_cites_article']}"
+        )
 
     p = out["v2_projection"]
-    line(f"\n===== V2 PROJECTION (Track-B) =====")
+    line("\n===== V2 PROJECTION (Track-B) =====")
     line(f"  held-out pairs total          : {p['heldout_pairs_total']}")
     line(f"  TF-IDF fail-rate@10           : {p['tfidf_fail_rate_at_10']:.3f}")
     line(f"  surviving hard queries        : {p['surviving_hard_queries']}")

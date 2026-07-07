@@ -44,7 +44,7 @@ def build_full():
     if cache.exists():
         return pickle.loads(cache.read_bytes())
     from lexfr_embed.data.legalkit import load_legalkit
-    from lexfr_embed.data.trackb import build_holdout, trained_ids, pair_id
+    from lexfr_embed.data.trackb import pair_id, trained_ids
 
     all_pairs = load_legalkit(None)
     trained = trained_ids()
@@ -101,8 +101,10 @@ def build_full():
 def main():
     print("building full corpus ...")
     d = build_full()
-    print(f"  full corpus={d['n_full_corpus']}  query_pool={d['n_query_pool']}  "
-          f"heldout_gold_articles={d['n_heldout_gold_articles']}  gold_also_trained_text={d['n_gold_also_trained_text']}")
+    print(
+        f"  full corpus={d['n_full_corpus']}  query_pool={d['n_query_pool']}  "
+        f"heldout_gold_articles={d['n_heldout_gold_articles']}  gold_also_trained_text={d['n_gold_also_trained_text']}"
+    )
 
     vec = TfidfVectorizer(sublinear_tf=True, lowercase=True, dtype=np.float32)
     Xc = vec.fit_transform(d["corpus_texts"])
@@ -145,7 +147,7 @@ def main():
     for s in range(0, len(g_rows), b):
         e = min(s + b, len(g_rows))
         sims = (Xg[s:e] @ Xd.T).toarray()
-        has_trained_dup[s : e] = sims.max(axis=1) > 0.8
+        has_trained_dup[s:e] = sims.max(axis=1) > 0.8
     frac_gold_trained_dup = float(has_trained_dup.mean())
 
     n_pool = d["n_query_pool"]

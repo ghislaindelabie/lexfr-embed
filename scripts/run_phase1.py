@@ -69,9 +69,7 @@ def main() -> None:
 
     # 4) TWO-STAGE TRAIN (+ SAVE). LoRA for the real bases; full-FT for the MiniLM smoke.
     use_lora = settings.base_model_key != "smoke"
-    model = train_embedder(
-        train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=args.out_dir
-    )
+    model = train_embedder(train_pairs=pairs, rehearsal_pairs=rehearsal, use_lora=use_lora, out_dir=args.out_dir)
 
     # 5) Axis-1 AFTER + paired bootstrap CI + per-query MDE.
     after = per_query_ndcg_at_k(model, queries, corpus, relevant, k=10, batch_size=16)
