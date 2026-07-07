@@ -2,7 +2,7 @@
 
 *A detailed trace of decisions, implementation steps, and intermediary results. Combines the working discussions, the validated results, and what is recorded in git. Chronological with consolidated tables at the end.*
 
-**Last updated:** 2026-07-05 · **Status:** **Local RTX 5060 Ti live; reproduction validated; 24 h sweep done → the EVAL is the bottleneck.** PRs #1–#13 merged. The BGE-M3 fine-tune (BSARD 0.240 → 0.282) is robust but **saturated on the n=222 proxy** (σ_run=0.005 vs MDE 0.032 — data/LR/epochs/hard-neg all within noise); a **zero-training reranker adds ~2×** (+0.105). Next investment = a **powered, on-register, held-out French-professional benchmark** + a **reranker/graph architecture**, not more sweeps. Repo **public** (JOSS clock ~2026-12-23). *(Sections 5–7 predate the merges; see the §3 dated entries for the current state.)*
+**Last updated:** 2026-07-07 · **(2026-07-07: A1 denoising = NULL; Track-B v2 built — powered FR eval MDE 0.016; fine-tune confirmed +0.019–0.029 paired; reranker +0.105 = dominant lever; recall curve shows fine-tuned@top-20 ≈ base@top-50; A1-bis distillation queued with a recall-curve success criterion.)** · **Status:** **Local RTX 5060 Ti live; reproduction validated; 24 h sweep done → the EVAL is the bottleneck.** PRs #1–#13 merged. The BGE-M3 fine-tune (BSARD 0.240 → 0.282) is robust but **saturated on the n=222 proxy** (σ_run=0.005 vs MDE 0.032 — data/LR/epochs/hard-neg all within noise); a **zero-training reranker adds ~2×** (+0.105). Next investment = a **powered, on-register, held-out French-professional benchmark** + a **reranker/graph architecture**, not more sweeps. Repo **public** (JOSS clock ~2026-12-23). *(Sections 5–7 predate the merges; see the §3 dated entries for the current state.)*
 
 ---
 
@@ -219,6 +219,24 @@ Attempted **two levers at once**: scale the legal set 15k → 30k (~24k after de
 - **DECISIONS:** (a) **the EVAL is the bottleneck** → invest in a better benchmark, not more sweeps; (b) dropped the low-value SEQ-1024/DATA-full tail; (c) **architecture insight: a reranker + (future) graph/ontology beat marginal embedder tuning**; (d) launched an extended ~16 h research window (eval-expansion + rehearsal recovery + a data-driven roadmap) designed via ultracode. Investigations into a **better eval (field contribution)**, **training-data improvements**, and **graph/ontology** are in progress.
 
 ---
+
+### 2026-07-06→07 — A1 verdict, Track-B v2, powered/paired results, recall curve, LDS check, power policy
+
+**A1 (denoised hard-negative mining) — implemented (TDD) and tested → NULL.** Cross-encoder rescoring dropped ~8% of mined negatives (vs 3% margin-only), materially changing the training data — yet Δ ≈ 0 on every eval (BSARD paired −0.002; Track-B v2 −0.001). Combined with the campaign's `HP-noneg` ≈ baseline, this **disproves the "false-negative" hypothesis**: hard negatives (mined, denoised, or absent) don't move the needle — MNRL's 127 in-batch negatives (kept via CachedMNRL, batch 128 / mini 16) already dominate. A1 retired.
+
+**Track-B v2 — a powered, discriminating FR eval.** BSARD (n=222, MDE ~0.05) is too coarse; a first held-out LegalKit eval (v1) was trivially solved by a **zero-ML TF-IDF (90% top-1)** → it measured lexical overlap (LLaMA-3 reuses ~70% of the article's words); the **same-generator confound = +0.70 NDCG inflation**. v2 (`data/trackb_v2.py`, `scripts/build_trackb_v2.py`): full 52k-article corpus, keep only the 2,818 queries where TF-IDF fails, near-dup multi-label qrels → base drops 0.972→0.822, **MDE 0.016**. Evaluable via `eval_extra --split trackb2`.
+
+**Verdicts (paired bootstrap, 95% CI excluding zero).** Fine-tuning: **+0.019 (BSARD traintest n=1108) / +0.029 (Track-B v2)** — real but modest (the early +0.052 sat at BSARD's noise floor). Data volume: 30k > 15k. **Reranker (retrieve-then-rerank): +0.105** — the dominant lever (~2× the fine-tune), zero training.
+
+**Recall curve (base vs fine-tuned, Track-B v2)** — fine-tuning *promotes* golds up: hit@5 0.914→0.937 (+0.023), MRR@10 0.818→0.861 (+0.043), gain concentrated at small k. **Fine-tuned@top-20 (0.967) ≈ base@top-50 (0.969)** → a better first stage lets the reranker run on a shallower candidate set (top-20 vs top-50) = cheaper pipeline. **TODO: recall curve adopted as a standing metric** (the right lens for reranker-gate cost + distillation); visual added to the soutenance doc.
+
+**Reranker inference cost (measured).** `bge-reranker-v2-m3` ~42 pairs/s @150W fp32 on the 5060 Ti; cost is **per-query, linear in top-K** (top-100 ≈ 2.4 s/query, top-20 ≈ 0.47 s). Reranking is *free to adopt, paid on every query* → top-20 gate + smaller/distilled reranker are the cost levers.
+
+**LDS production retrieval (GitLab `alias3/datastreaming/*`).** Default embedder = **`BAAI/bge-m3`** (our base; Mistral for EU-sovereignty per cluster). A reranking node exists (`bge-reranker-large`) but is **OFF by default** (base search returns raw Qdrant/Meilisearch order). **No IR-metric eval anywhere.** → highest-value contributions: turn on retrieve-then-rerank for legal clusters + provide the IR-eval harness + ship the FR-legal embedder as a bge-m3 drop-in.
+
+**GPU power policy (measured + persisted).** 150 W cap (systemd `gpu-power-cap.service` + persistence) = **−1.6% throughput for −17% power** (memory-bound regime); 5060 Ti = **2.0× a Kaggle T4** (matched microbench). Per-job override `scripts/gpu_power.sh`. Documented in the P710 reference.
+
+**NEXT — A1-bis (distill reranker → embedder), success criterion LOCKED.** Offline teacher pass (score mined candidates with `bge-reranker-v2-m3`, cache — 16 GB-friendly, no co-residency) → listwise/MarginMSE distillation into the LoRA embedder → eval on Track-B v2 + BSARD. **Success = judged on the recall curve, not NDCG alone: lift hit@5 toward hit@50 → rerank top-5 (or skip) = reranker quality at first-stage cost.** Literature (Tamber 2025) predicts a *partial* close — hence measure on the curve.
 
 ## 4. Consolidated decisions
 
